@@ -25,6 +25,7 @@ import static io.crate.testing.TestingHelpers.createReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -810,5 +811,56 @@ public class CommonQueryBuilderTest extends LuceneQueryBuilderTest {
     public void test_neq_on_object_literal() {
         Query query = convert("(obj_no_sub_columns != {})");
         assertThat(query).hasToString("+(+*:* -(obj_no_sub_columns = {})) #(NOT (obj_no_sub_columns = {}))");
+    }
+
+    @Test
+    public void test_all_eq_on_array_literal_containing_null_elements() {
+        Query query = convert("y = all([1, null])");
+        assertThat(query).hasToString("MatchNoDocsQuery(\"Cannot match nulls\")");
+    }
+
+    @Test
+    public void test_all_eq_on_array_literal_containing_more_than_one_unique_elements() {
+        Query query = convert("y = all([1, 2])");
+        assertThat(query).hasToString("MatchNoDocsQuery(\"A single value cannot match more than one unique values\")");
+    }
+
+    @Test
+    public void test_all_eq_on_array_literal_containing_duplicates() throws Exception {
+        QueryTester.Builder builder = new QueryTester.Builder(
+            THREAD_POOL,
+            clusterService,
+            Version.CURRENT,
+            "create table tbl (a int)");
+        builder.indexValue("a", 1);
+        builder.indexValue("a", 2);
+        builder.indexValue("a", null);
+        try (QueryTester tester = builder.build()) {
+            Query query = tester.toQuery("a = all([1, 1])");
+            assertThat(query).hasToString("+a:[1 TO 1] #FieldExistsQuery [field=a]");
+            assertThat(tester.runQuery("a", "a = all([1, 1])")).containsExactly(1);
+        }
+    }
+
+    @Test
+    public void test_all_eq_on_array_ref() throws Exception {
+        var listOfNulls = new ArrayList<Integer>();
+        listOfNulls.add(null);
+        QueryTester.Builder builder = new QueryTester.Builder(
+            THREAD_POOL,
+            clusterService,
+            Version.CURRENT,
+            "create table tbl (a int[])");
+        builder.indexValue("a", List.of(1));
+        builder.indexValue("a", List.of(1, 1));
+        builder.indexValue("a", listOfNulls);
+        builder.indexValue("a", null);
+        try (QueryTester tester = builder.build()) {
+            Query query = tester.toQuery("1 = all(a)");
+            assertThat(query)
+                .hasToString("+(+*:* -((a:[2 TO 2147483647] a:[-2147483648 TO 0])~1)) #FieldExistsQuery [field=a]");
+            assertThat(tester.runQuery("a", "1 = all(a)"))
+                .containsExactly(List.of(1), List.of(1, 1));
+        }
     }
 }
