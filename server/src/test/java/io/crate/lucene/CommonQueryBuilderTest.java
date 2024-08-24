@@ -837,7 +837,7 @@ public class CommonQueryBuilderTest extends LuceneQueryBuilderTest {
         builder.indexValue("a", null);
         try (QueryTester tester = builder.build()) {
             Query query = tester.toQuery("a = all([1, 1])");
-            assertThat(query).hasToString("+a:[1 TO 1] #FieldExistsQuery [field=a]");
+            assertThat(query).hasToString("a:[1 TO 1]");
             assertThat(tester.runQuery("a", "a = all([1, 1])")).containsExactly(1);
         }
     }
@@ -853,6 +853,7 @@ public class CommonQueryBuilderTest extends LuceneQueryBuilderTest {
             "create table tbl (a int[])");
         builder.indexValue("a", List.of(1));
         builder.indexValue("a", List.of(1, 1));
+        builder.indexValue("a", List.of());
         builder.indexValue("a", listOfNulls);
         builder.indexValue("a", null);
         try (QueryTester tester = builder.build()) {
