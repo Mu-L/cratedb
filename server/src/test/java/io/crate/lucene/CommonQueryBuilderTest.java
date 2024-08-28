@@ -814,6 +814,12 @@ public class CommonQueryBuilderTest extends LuceneQueryBuilderTest {
     }
 
     @Test
+    public void test_all_eq_on_empty_array_literal() {
+        Query query = convert("y = all([])");
+        assertThat(query).hasToString("*:*");
+    }
+
+    @Test
     public void test_all_eq_on_array_literal_containing_null_elements() {
         Query query = convert("y = all([1, null])");
         assertThat(query).hasToString("MatchNoDocsQuery(\"Cannot match nulls\")");
@@ -859,9 +865,39 @@ public class CommonQueryBuilderTest extends LuceneQueryBuilderTest {
         try (QueryTester tester = builder.build()) {
             Query query = tester.toQuery("1 = all(a)");
             assertThat(query)
-                .hasToString("+(+*:* -((a:[2 TO 2147483647] a:[-2147483648 TO 0])~1)) #FieldExistsQuery [field=a]");
+                .hasToString("+(+*:* -((a:[2 TO 2147483647] a:[-2147483648 TO 0])~1)) #(NOT (1 <> ANY(a)))");
             assertThat(tester.runQuery("a", "1 = all(a)"))
-                .containsExactly(List.of(1), List.of(1, 1));
+                .containsExactly(List.of(1), List.of(1, 1), List.of());
+        }
+    }
+
+    @Test
+    public void test_all_eq_on_nested_array_ref_with_automatic_dimension_leveling() throws Exception {
+        var listOfNulls = new ArrayList<Integer>();
+        listOfNulls.add(null);
+        QueryTester.Builder builder = new QueryTester.Builder(
+            THREAD_POOL,
+            clusterService,
+            Version.CURRENT,
+            "create table tbl (a int[][])");
+        builder.indexValue("a", List.of(List.of(1)));
+        builder.indexValue("a", List.of(List.of(1, 1)));
+        builder.indexValue("a", List.of(List.of()));
+        builder.indexValue("a", List.of(listOfNulls));
+        builder.indexValue("a", null);
+        builder.indexValue("a", List.of());
+
+        try (QueryTester tester = builder.build()) {
+            Query query = tester.toQuery("1 = all(a)");
+            assertThat(query)
+                .hasToString("+(+*:* -((a:[2 TO 2147483647] a:[-2147483648 TO 0])~1)) #(NOT (1 <> ANY(array_unnest(a))))");
+            assertThat(tester.runQuery("a", "1 = all(a)"))
+                .containsExactly(
+                    List.of(List.of(1)),
+                    List.of(List.of(1, 1)),
+                    List.of(List.of()),
+                    List.of()
+                );
         }
     }
 }

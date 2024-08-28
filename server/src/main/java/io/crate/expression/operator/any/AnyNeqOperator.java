@@ -30,21 +30,32 @@ import org.elasticsearch.common.lucene.search.Queries;
 import org.jetbrains.annotations.NotNull;
 
 import io.crate.expression.operator.EqOperator;
+import io.crate.expression.operator.Operator;
 import io.crate.expression.predicate.IsNullPredicate;
 import io.crate.expression.symbol.Function;
 import io.crate.expression.symbol.Literal;
 import io.crate.lucene.LuceneQueryBuilder.Context;
+import io.crate.metadata.FunctionType;
 import io.crate.metadata.IndexType;
 import io.crate.metadata.Reference;
 import io.crate.metadata.functions.BoundSignature;
 import io.crate.metadata.functions.Signature;
+import io.crate.metadata.functions.TypeVariableConstraint;
 import io.crate.sql.tree.ComparisonExpression;
 import io.crate.types.EqQuery;
 import io.crate.types.StorageSupport;
+import io.crate.types.TypeSignature;
 
 public final class AnyNeqOperator extends AnyOperator<Object> {
 
-    public static String NAME = OPERATOR_PREFIX + ComparisonExpression.Type.NOT_EQUAL.getValue();
+    public static final String NAME = OPERATOR_PREFIX + ComparisonExpression.Type.NOT_EQUAL.getValue();
+    public static final Signature SIGNATURE = Signature.builder(NAME, FunctionType.SCALAR)
+        .argumentTypes(TypeSignature.parse("E"),
+            TypeSignature.parse("array(E)"))
+        .returnType(Operator.RETURN_TYPE.getTypeSignature())
+        .features(Feature.DETERMINISTIC)
+        .typeVariableConstraints(TypeVariableConstraint.typeVariable("E"))
+        .build();
 
     AnyNeqOperator(Signature signature, BoundSignature boundSignature) {
         super(signature, boundSignature);

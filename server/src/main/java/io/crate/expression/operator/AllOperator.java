@@ -76,15 +76,7 @@ public class AllOperator extends Operator<Object> {
                     )
             );
         }
-        builder.add(
-            AllEqOperator.SIGNATURE,
-            (signature, boundSignature) ->
-                new AllEqOperator(
-                    signature,
-                    boundSignature,
-                    result -> result == 0
-                )
-        );
+        builder.add(AllEqOperator.SIGNATURE, AllEqOperator::new);
     }
 
     private final IntPredicate cmp;

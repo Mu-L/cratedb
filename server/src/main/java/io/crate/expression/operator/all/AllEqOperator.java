@@ -25,21 +25,18 @@ import static io.crate.metadata.functions.TypeVariableConstraint.typeVariable;
 
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.function.IntPredicate;
 import java.util.stream.StreamSupport;
 
-import org.apache.lucene.search.BooleanClause;
-import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
-import org.elasticsearch.common.lucene.search.Queries;
 import org.jetbrains.annotations.Nullable;
 
 import io.crate.expression.operator.AllOperator;
 import io.crate.expression.operator.EqOperator;
 import io.crate.expression.operator.Operator;
 import io.crate.expression.operator.any.AnyNeqOperator;
-import io.crate.expression.predicate.IsNullPredicate;
+import io.crate.expression.predicate.NotPredicate;
 import io.crate.expression.scalar.ArrayUnnestFunction;
 import io.crate.expression.symbol.Function;
 import io.crate.expression.symbol.Literal;
@@ -54,26 +51,26 @@ import io.crate.types.TypeSignature;
 
 public class AllEqOperator extends AllOperator {
 
-    public static String NAME = OPERATOR_PREFIX + ComparisonExpression.Type.EQUAL.getValue();
-    public static Signature SIGNATURE = Signature.builder(AllEqOperator.NAME, FunctionType.SCALAR)
+    public static final String NAME = OPERATOR_PREFIX + ComparisonExpression.Type.EQUAL.getValue();
+    public static final Signature SIGNATURE = Signature.builder(AllEqOperator.NAME, FunctionType.SCALAR)
             .argumentTypes(TypeSignature.parse("E"), TypeSignature.parse("array(E)"))
             .returnType(Operator.RETURN_TYPE.getTypeSignature())
             .typeVariableConstraints(typeVariable("E"))
             .features(Feature.DETERMINISTIC, Feature.STRICTNULL)
             .build();
 
-    public AllEqOperator(Signature signature, BoundSignature boundSignature, IntPredicate cmp) {
-        super(signature, boundSignature, cmp);
+    public AllEqOperator(Signature signature, BoundSignature boundSignature) {
+        super(signature, boundSignature, result -> result == 0);
     }
 
     public static Query refMatchesAllArrayLiteral(Reference probe, List<?> values, LuceneQueryBuilder.Context context) {
         // col = ALL ([1,2,3]) --> col=1 and col=2 and col=3
         LinkedHashSet<?> uniqueValues = new LinkedHashSet<>(values);
+        if (uniqueValues.isEmpty()) {
+            return new MatchAllDocsQuery();
+        }
         if (uniqueValues.contains(null)) {
             return new MatchNoDocsQuery("Cannot match nulls");
-        }
-        if (uniqueValues.isEmpty()) {
-            return new MatchNoDocsQuery("Cannot match unless there is at least one non-null candidate");
         }
         if (uniqueValues.size() > 1) {
             // `col=x and col=y` evaluates to `false` unless `x == y`
@@ -89,15 +86,23 @@ public class AllEqOperator extends AllOperator {
         return context.visitor().visitFunction(eq, context);
     }
 
-    public static Query literalMatchesAllArrayRef(Literal<?> probe, Reference candidates, LuceneQueryBuilder.Context context) {
+    public static Query literalMatchesAllArrayRef(Function allEq, LuceneQueryBuilder.Context context) {
         // 1 = ALL(array_col)
         // --> 1 = array_col[1] and 1 = array_col[2] and 1 = array_col[3]
         // --> not(1 != array_col[1] or 1 != array_col[2] or 1 != array_col[3])
         // --> not(1 != ANY(array_col))
-        return new BooleanQuery.Builder()
-            .add(Queries.not(AnyNeqOperator.literalMatchesAnyArrayRef(probe, candidates)), BooleanClause.Occur.MUST)
-            .add(IsNullPredicate.refExistsQuery(candidates, context, false), BooleanClause.Occur.FILTER)
-            .build();
+        Function notAnyNeq = new Function(
+            NotPredicate.SIGNATURE,
+            List.of(
+                new Function(
+                    AnyNeqOperator.SIGNATURE,
+                    allEq.arguments(),
+                    Operator.RETURN_TYPE
+                )
+            ),
+            Operator.RETURN_TYPE
+        );
+        return context.visitor().visitFunction(notAnyNeq, context);
     }
 
     @Override
@@ -105,11 +110,13 @@ public class AllEqOperator extends AllOperator {
         List<Symbol> args = function.arguments();
         Symbol probe = args.get(0);
         Symbol candidates = args.get(1);
+        // CrateDB automatically unnests the array argument to the number of dimensions required
+        // i.e. SELECT 1 = ALL([[1, 2], [3, 4]]) -> false
         while (candidates instanceof Function fn && fn.signature().equals(ArrayUnnestFunction.SIGNATURE)) {
             candidates = fn.arguments().get(0);
         }
-        if (probe instanceof Literal<?> literal && candidates instanceof Reference ref) {
-            return literalMatchesAllArrayRef(literal, ref, context);
+        if (probe instanceof Literal<?> && candidates instanceof Reference) {
+            return literalMatchesAllArrayRef(function, context);
         } else if (probe instanceof Reference ref && candidates instanceof Literal<?> literal) {
             var values = StreamSupport
                 .stream(((Iterable<?>) literal.value()).spliterator(), false)
