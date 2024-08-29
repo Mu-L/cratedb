@@ -90,7 +90,7 @@ public class AllEqOperator extends AllOperator {
         return context.visitor().visitFunction(eq, context);
     }
 
-    public static Query literalMatchesAllArrayRef(Function allEq, Literal<?> probe, Reference candidates, LuceneQueryBuilder.Context context) {
+    public static Query literalMatchesAllArrayRef(Literal<?> probe, Reference candidates, LuceneQueryBuilder.Context context) {
         // 1 = ALL(array_col)
         // --> 1 = array_col[1] and 1 = array_col[2] and 1 = array_col[3]
         // --> not(1 != array_col[1] or 1 != array_col[2] or 1 != array_col[3])
@@ -112,8 +112,8 @@ public class AllEqOperator extends AllOperator {
         while (candidates instanceof Function fn && fn.signature().equals(ArrayUnnestFunction.SIGNATURE)) {
             candidates = fn.arguments().get(0);
         }
-        if (probe instanceof Literal<?> l && candidates instanceof Reference r) {
-            return literalMatchesAllArrayRef(function, l, r , context);
+        if (probe instanceof Literal<?> literal && candidates instanceof Reference ref) {
+            return literalMatchesAllArrayRef(literal, ref, context);
         } else if (probe instanceof Reference ref && candidates instanceof Literal<?> literal) {
             var values = StreamSupport
                 .stream(((Iterable<?>) literal.value()).spliterator(), false)
