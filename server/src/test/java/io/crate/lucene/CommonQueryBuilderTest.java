@@ -852,6 +852,10 @@ public class CommonQueryBuilderTest extends LuceneQueryBuilderTest {
     public void test_all_eq_on_array_ref() throws Exception {
         var listOfNulls = new ArrayList<Integer>();
         listOfNulls.add(null);
+        var listOfOneAndNull = new ArrayList<Integer>();
+        listOfOneAndNull.add(1);
+        listOfOneAndNull.add(null);
+
         QueryTester.Builder builder = new QueryTester.Builder(
             THREAD_POOL,
             clusterService,
@@ -862,10 +866,11 @@ public class CommonQueryBuilderTest extends LuceneQueryBuilderTest {
         builder.indexValue("a", List.of());
         builder.indexValue("a", listOfNulls);
         builder.indexValue("a", null);
+        builder.indexValue("a", listOfOneAndNull);
         try (QueryTester tester = builder.build()) {
             Query query = tester.toQuery("1 = all(a)");
             assertThat(query)
-                .hasToString("+(+*:* -((a:[2 TO 2147483647] a:[-2147483648 TO 0])~1)) #FieldExistsQuery [field=_array_length_a] #((FieldExistsQuery [field=a] _array_length_a:[0 TO 0])~1)");
+                .hasToString("+(+*:* -((a:[2 TO 2147483647] a:[-2147483648 TO 0])~1)) #(NOT (1 <> ANY(a)))");
             assertThat(tester.runQuery("a", "1 = all(a)"))
                 .containsExactly(List.of(1), List.of(1, 1), List.of());
         }
@@ -875,6 +880,10 @@ public class CommonQueryBuilderTest extends LuceneQueryBuilderTest {
     public void test_all_eq_on_nested_array_ref_with_automatic_dimension_leveling() throws Exception {
         var listOfNulls = new ArrayList<Integer>();
         listOfNulls.add(null);
+        var listOfOneAndNull = new ArrayList<Integer>();
+        listOfOneAndNull.add(1);
+        listOfOneAndNull.add(null);
+
         QueryTester.Builder builder = new QueryTester.Builder(
             THREAD_POOL,
             clusterService,
@@ -886,11 +895,12 @@ public class CommonQueryBuilderTest extends LuceneQueryBuilderTest {
         builder.indexValue("a", List.of(listOfNulls));
         builder.indexValue("a", null);
         builder.indexValue("a", List.of());
+        builder.indexValue("a", List.of(listOfOneAndNull));
 
         try (QueryTester tester = builder.build()) {
             Query query = tester.toQuery("1 = all(a)");
             assertThat(query)
-                .hasToString("+(+*:* -((a:[2 TO 2147483647] a:[-2147483648 TO 0])~1)) #FieldExistsQuery [field=_array_length_a] #((FieldExistsQuery [field=a] _array_length_a:[0 TO 0])~1)");
+                .hasToString("+(+*:* -((a:[2 TO 2147483647] a:[-2147483648 TO 0])~1)) #(NOT (1 <> ANY(array_unnest(a))))");
             assertThat(tester.runQuery("a", "1 = all(a)"))
                 .containsExactly(
                     List.of(List.of(1)),

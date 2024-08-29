@@ -30,8 +30,6 @@ import java.util.function.Function;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.IntField;
 import org.apache.lucene.document.IntPoint;
-import org.apache.lucene.search.BooleanClause;
-import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.FieldExistsQuery;
 import org.apache.lucene.search.Query;
 import org.elasticsearch.Version;
@@ -56,26 +54,6 @@ public class ArrayIndexer<T> implements ValueIndexer<List<T>> {
 
     public static Query arrayLengthExistsQuery(Reference arrayRef, Function<ColumnIdent, Reference> getRef) {
         return new FieldExistsQuery(toArrayLengthFieldName(arrayRef, getRef));
-    }
-
-    /**
-     *  Inserting [1, 2, 3] to a array(int) column 'c' generates:
-     *    IntField(_array_length_c, 3)
-     *    IntField(c, 1)
-     *    IntField(c, 2)
-     *    IntField(c, 3)
-     *  Inserting [null, null] generates:
-     *    IntField(_array_length_c, 2)
-     *  Inserting [] generates:
-     *    IntField(_array_length_c, 0)
-     *  Therefore we can filter array of nulls by `FieldExistsQuery(c) || _array_length_c = 0`.
-     */
-    public static Query arrayOfNullsFilterQuery(Reference arrayRef, Function<ColumnIdent, Reference> getRef) {
-        return new BooleanQuery.Builder()
-            .setMinimumNumberShouldMatch(1)
-            .add(new FieldExistsQuery(arrayRef.storageIdent()), BooleanClause.Occur.SHOULD)
-            .add(arrayLengthTermQuery(arrayRef, 0, getRef), BooleanClause.Occur.SHOULD)
-            .build();
     }
 
     static String toArrayLengthFieldName(Reference arrayRef, Function<ColumnIdent, Reference> getRef) {
