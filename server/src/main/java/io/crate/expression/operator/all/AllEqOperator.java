@@ -27,16 +27,20 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.stream.StreamSupport;
 
+import org.apache.lucene.search.BooleanClause.Occur;
+import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
+import org.elasticsearch.common.lucene.search.Queries;
 import org.jetbrains.annotations.Nullable;
 
+import io.crate.execution.dml.ArrayIndexer;
 import io.crate.expression.operator.AllOperator;
 import io.crate.expression.operator.EqOperator;
 import io.crate.expression.operator.Operator;
 import io.crate.expression.operator.any.AnyNeqOperator;
-import io.crate.expression.predicate.NotPredicate;
+import io.crate.expression.predicate.IsNullPredicate;
 import io.crate.expression.scalar.ArrayUnnestFunction;
 import io.crate.expression.symbol.Function;
 import io.crate.expression.symbol.Literal;
@@ -86,23 +90,16 @@ public class AllEqOperator extends AllOperator {
         return context.visitor().visitFunction(eq, context);
     }
 
-    public static Query literalMatchesAllArrayRef(Function allEq, LuceneQueryBuilder.Context context) {
+    public static Query literalMatchesAllArrayRef(Function allEq, Literal<?> probe, Reference candidates, LuceneQueryBuilder.Context context) {
         // 1 = ALL(array_col)
         // --> 1 = array_col[1] and 1 = array_col[2] and 1 = array_col[3]
         // --> not(1 != array_col[1] or 1 != array_col[2] or 1 != array_col[3])
         // --> not(1 != ANY(array_col))
-        Function notAnyNeq = new Function(
-            NotPredicate.SIGNATURE,
-            List.of(
-                new Function(
-                    AnyNeqOperator.SIGNATURE,
-                    allEq.arguments(),
-                    Operator.RETURN_TYPE
-                )
-            ),
-            Operator.RETURN_TYPE
-        );
-        return context.visitor().visitFunction(notAnyNeq, context);
+        return new BooleanQuery.Builder()
+            .add(Queries.not(AnyNeqOperator.literalMatchesAnyArrayRef(probe, candidates)), Occur.MUST)
+            .add(IsNullPredicate.refExistsQuery(candidates, context), Occur.FILTER) // is not null
+            .add(ArrayIndexer.arrayOfNullsFilterQuery(candidates, context.tableInfo()::getReference), Occur.FILTER) // is not array of nulls
+            .build();
     }
 
     @Override
@@ -115,8 +112,8 @@ public class AllEqOperator extends AllOperator {
         while (candidates instanceof Function fn && fn.signature().equals(ArrayUnnestFunction.SIGNATURE)) {
             candidates = fn.arguments().get(0);
         }
-        if (probe instanceof Literal<?> && candidates instanceof Reference) {
-            return literalMatchesAllArrayRef(function, context);
+        if (probe instanceof Literal<?> l && candidates instanceof Reference r) {
+            return literalMatchesAllArrayRef(function, l, r , context);
         } else if (probe instanceof Reference ref && candidates instanceof Literal<?> literal) {
             var values = StreamSupport
                 .stream(((Iterable<?>) literal.value()).spliterator(), false)

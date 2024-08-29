@@ -865,7 +865,7 @@ public class CommonQueryBuilderTest extends LuceneQueryBuilderTest {
         try (QueryTester tester = builder.build()) {
             Query query = tester.toQuery("1 = all(a)");
             assertThat(query)
-                .hasToString("+(+*:* -((a:[2 TO 2147483647] a:[-2147483648 TO 0])~1)) #(NOT (1 <> ANY(a)))");
+                .hasToString("+(+*:* -((a:[2 TO 2147483647] a:[-2147483648 TO 0])~1)) #FieldExistsQuery [field=_array_length_a] #((FieldExistsQuery [field=a] _array_length_a:[0 TO 0])~1)");
             assertThat(tester.runQuery("a", "1 = all(a)"))
                 .containsExactly(List.of(1), List.of(1, 1), List.of());
         }
@@ -890,7 +890,7 @@ public class CommonQueryBuilderTest extends LuceneQueryBuilderTest {
         try (QueryTester tester = builder.build()) {
             Query query = tester.toQuery("1 = all(a)");
             assertThat(query)
-                .hasToString("+(+*:* -((a:[2 TO 2147483647] a:[-2147483648 TO 0])~1)) #(NOT (1 <> ANY(array_unnest(a))))");
+                .hasToString("+(+*:* -((a:[2 TO 2147483647] a:[-2147483648 TO 0])~1)) #FieldExistsQuery [field=_array_length_a] #((FieldExistsQuery [field=a] _array_length_a:[0 TO 0])~1)");
             assertThat(tester.runQuery("a", "1 = all(a)"))
                 .containsExactly(
                     List.of(List.of(1)),
