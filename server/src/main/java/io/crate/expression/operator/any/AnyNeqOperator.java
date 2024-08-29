@@ -91,12 +91,8 @@ public final class AnyNeqOperator extends AnyOperator<Object> {
     }
 
     @Override
-    protected Query literalMatchesAnyArrayRef(Function any, Literal<?> probe, Reference candidates, Context context) {
-        return literalMatchesAnyArrayRef(probe, candidates);
-    }
-
     @SuppressWarnings({"unchecked", "rawtypes"})
-    public static Query literalMatchesAnyArrayRef(Literal<?> probe, Reference candidates) {
+    protected Query literalMatchesAnyArrayRef(Function any, Literal<?> probe, Reference candidates, Context context) {
         // 1 != any ( col ) -->  gt 1 or lt 1
         String columnName = candidates.storageIdent();
         StorageSupport<?> storageSupport = probe.valueType().storageSupport();

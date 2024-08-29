@@ -87,7 +87,6 @@ public abstract sealed class AnyOperator<T> extends Operator<T>
     public static void register(Functions.Builder builder) {
         reg(builder, AnyEqOperator.NAME, AnyEqOperator::new);
         builder.add(AnyNeqOperator.SIGNATURE, AnyNeqOperator::new);
-        reg(builder, AnyNeqOperator.NAME, AnyNeqOperator::new);
         regRange(builder, AnyRangeOperator.Comparison.GT);
         regRange(builder, AnyRangeOperator.Comparison.GTE);
         regRange(builder, AnyRangeOperator.Comparison.LT);
