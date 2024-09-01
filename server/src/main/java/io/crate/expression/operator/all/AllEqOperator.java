@@ -76,14 +76,15 @@ public class AllEqOperator extends AllOperator {
             // `col=x and col=y` evaluates to `false` unless `x == y`
             return new MatchNoDocsQuery("A single value cannot match more than one unique values");
         }
-        var value = uniqueValues.getFirst();
         // col = all([1]) --> col = 1
-        Function eq = new Function(
-            EqOperator.SIGNATURE,
-            List.of(probe, Literal.ofUnchecked(probe.valueType(), value)),
-            EqOperator.RETURN_TYPE
+        var value = uniqueValues.getFirst();
+        return EqOperator.fromPrimitive(
+            probe.valueType(),
+            probe.storageIdent(),
+            value,
+            probe.hasDocValues(),
+            probe.indexType()
         );
-        return context.visitor().visitFunction(eq, context);
     }
 
     public static Query literalMatchesAllArrayRef(Function allEq, LuceneQueryBuilder.Context context) {
