@@ -27,11 +27,15 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.stream.StreamSupport;
 
+import org.apache.lucene.search.BooleanClause.Occur;
+import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
+import org.elasticsearch.common.lucene.search.Queries;
 import org.jetbrains.annotations.Nullable;
 
+import io.crate.execution.dml.ArrayIndexer;
 import io.crate.expression.operator.AllOperator;
 import io.crate.expression.operator.EqOperator;
 import io.crate.expression.operator.Operator;
@@ -47,6 +51,7 @@ import io.crate.metadata.Reference;
 import io.crate.metadata.functions.BoundSignature;
 import io.crate.metadata.functions.Signature;
 import io.crate.sql.tree.ComparisonExpression;
+import io.crate.types.ArrayType;
 import io.crate.types.TypeSignature;
 
 public class AllEqOperator extends AllOperator {
@@ -87,23 +92,36 @@ public class AllEqOperator extends AllOperator {
         );
     }
 
-    public static Query literalMatchesAllArrayRef(Function allEq, LuceneQueryBuilder.Context context) {
-        // 1 = ALL(array_col)
-        // --> 1 = array_col[1] and 1 = array_col[2] and 1 = array_col[3]
-        // --> not(1 != array_col[1] or 1 != array_col[2] or 1 != array_col[3])
-        // --> not(1 != ANY(array_col))
-        Function notAnyNeq = new Function(
-            NotPredicate.SIGNATURE,
-            List.of(
-                new Function(
-                    AnyNeqOperator.SIGNATURE,
-                    allEq.arguments(),
-                    Operator.RETURN_TYPE
-                )
-            ),
-            Operator.RETURN_TYPE
-        );
-        return context.visitor().visitFunction(notAnyNeq, context);
+    public static Query literalMatchesAllArrayRef(Function allEq, Literal<?> literal, Reference ref, LuceneQueryBuilder.Context context) {
+        if (ArrayType.dimensions(ref.valueType()) > 1) {
+            Function notAnyNeq = new Function(
+                NotPredicate.SIGNATURE,
+                List.of(
+                    new Function(
+                        AnyNeqOperator.SIGNATURE,
+                        allEq.arguments(),
+                        Operator.RETURN_TYPE
+                    )
+                ),
+                Operator.RETURN_TYPE
+            );
+            return context.visitor().visitFunction(notAnyNeq, context);
+        }
+        // 1 = all(array_ref) --> returns true for arrays satisfying the following conditions:
+        //   1) arrays without null elements that does not contain values other than the literal
+        //   2) empty
+        var arraysWithoutNullElementsQuery = ArrayIndexer.arraysWithoutNullElementsQuery(ref, context.tableInfo()::getReference);
+        var doesNotContainValuesOtherThanLiteral = Queries.not(AnyNeqOperator.literalMatchesAnyArrayRef(literal, ref)); // not(array_ref > 1 || array_ref < 1)
+        var emptyArrays = ArrayIndexer.arrayLengthTermQuery(ref, 0, context.tableInfo()::getReference);
+        return new BooleanQuery.Builder()
+            .setMinimumNumberShouldMatch(1)
+            .add(
+                new BooleanQuery.Builder()
+                    .add(arraysWithoutNullElementsQuery, Occur.MUST)
+                    .add(doesNotContainValuesOtherThanLiteral, Occur.MUST)
+                    .build(), Occur.SHOULD)
+            .add(emptyArrays, Occur.SHOULD)
+            .build();
     }
 
     @Override
@@ -116,8 +134,8 @@ public class AllEqOperator extends AllOperator {
         while (candidates instanceof Function fn && fn.signature().equals(ArrayUnnestFunction.SIGNATURE)) {
             candidates = fn.arguments().get(0);
         }
-        if (probe instanceof Literal<?> && candidates instanceof Reference) {
-            return literalMatchesAllArrayRef(function, context);
+        if (probe instanceof Literal<?> literal && candidates instanceof Reference ref) {
+            return literalMatchesAllArrayRef(function, literal, ref, context);
         } else if (probe instanceof Reference ref && candidates instanceof Literal<?> literal) {
             var values = StreamSupport
                 .stream(((Iterable<?>) literal.value()).spliterator(), false)

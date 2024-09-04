@@ -37,6 +37,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.VisibleForTesting;
 
+import io.crate.expression.scalar.ArraysWithoutNullElementsQuery;
 import io.crate.metadata.ColumnIdent;
 import io.crate.metadata.Reference;
 import io.crate.metadata.table.TableInfo;
@@ -56,7 +57,15 @@ public class ArrayIndexer<T> implements ValueIndexer<List<T>> {
         return new FieldExistsQuery(toArrayLengthFieldName(arrayRef, getRef));
     }
 
-    static String toArrayLengthFieldName(Reference arrayRef, Function<ColumnIdent, Reference> getRef) {
+    public static Query arraysWithAtLeastOneNonNullElementQuery(Reference arrayRef) {
+        return new FieldExistsQuery(arrayRef.storageIdent());
+    }
+
+    public static Query arraysWithoutNullElementsQuery(Reference arrayRef, Function<ColumnIdent, Reference> getRef) {
+        return new ArraysWithoutNullElementsQuery(arrayRef, getRef);
+    }
+
+    public static String toArrayLengthFieldName(Reference arrayRef, Function<ColumnIdent, Reference> getRef) {
         // If the arrayRef is a descendant of an object array its type can be a readType. i.e. the type of
         // obj_array['int_col'] is 'int' BUT its readType is 'array(int)'. If so, there is no '_array_length_' indexed
         // for obj_array['int_col']. Imagine indexing obj_array = [{int_col = 1}, {int_col = 2}], '_array_length_obj_array'

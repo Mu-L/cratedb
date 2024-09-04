@@ -90,9 +90,8 @@ public final class AnyNeqOperator extends AnyOperator<Object> {
             .build();
     }
 
-    @Override
     @SuppressWarnings({"unchecked", "rawtypes"})
-    protected Query literalMatchesAnyArrayRef(Function any, Literal<?> probe, Reference candidates, Context context) {
+    public static Query literalMatchesAnyArrayRef(Literal<?> probe, Reference candidates) {
         // 1 != any ( col ) -->  gt 1 or lt 1
         String columnName = candidates.storageIdent();
         StorageSupport<?> storageSupport = probe.valueType().storageSupport();
@@ -129,5 +128,10 @@ public final class AnyNeqOperator extends AnyOperator<Object> {
         query.add(gt, Occur.SHOULD);
         query.add(lt, Occur.SHOULD);
         return query.build();
+    }
+
+    @Override
+    protected Query literalMatchesAnyArrayRef(Function any, Literal<?> probe, Reference candidates, Context context) {
+        return literalMatchesAnyArrayRef(probe, candidates);
     }
 }
