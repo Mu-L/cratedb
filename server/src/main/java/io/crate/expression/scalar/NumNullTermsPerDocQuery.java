@@ -24,11 +24,13 @@ package io.crate.expression.scalar;
 import java.io.IOException;
 import java.util.function.Function;
 import java.util.function.IntPredicate;
+import java.util.function.IntUnaryOperator;
 
 import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SortedNumericDocValues;
+import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.search.ConstantScoreScorer;
 import org.apache.lucene.search.ConstantScoreWeight;
 import org.apache.lucene.search.DocIdSetIterator;
@@ -44,23 +46,30 @@ import io.crate.execution.dml.ArrayIndexer;
 import io.crate.metadata.ColumnIdent;
 import io.crate.metadata.Reference;
 import io.crate.types.ArrayType;
+import io.crate.types.BitStringType;
 import io.crate.types.BooleanType;
 import io.crate.types.ByteType;
+import io.crate.types.CharacterType;
 import io.crate.types.DataType;
 import io.crate.types.DoubleType;
 import io.crate.types.FloatType;
 import io.crate.types.GeoPointType;
 import io.crate.types.IntegerType;
+import io.crate.types.IpType;
 import io.crate.types.LongType;
+import io.crate.types.NumericStorage;
+import io.crate.types.NumericType;
 import io.crate.types.ShortType;
+import io.crate.types.StringType;
 import io.crate.types.TimestampType;
 
-public class ArraysWithoutNullElementsQuery extends Query {
+public class NumNullTermsPerDocQuery extends Query {
 
     private final Reference ref;
-    private final java.util.function.Function<LeafReaderContext, IntPredicate> arraysWithoutNullElementsPredicateFactory;
+    private final java.util.function.Function<LeafReaderContext, IntUnaryOperator> NumNullTermsPerDocFactory;
+    private final IntPredicate matches;
 
-    private static IntPredicate getArraysWithoutNullElementsPredicate(LeafReader reader, Reference ref, Function<ColumnIdent, Reference> getRef) {
+    private static IntUnaryOperator getNumNullTermsPerDocFunction(LeafReader reader, Reference ref, Function<ColumnIdent, Reference> getRef) {
         DataType<?> elementType = ArrayType.unnest(ref.valueType());
         switch (elementType.id()) {
             case BooleanType.ID:
@@ -73,36 +82,72 @@ public class ArraysWithoutNullElementsQuery extends Query {
             case FloatType.ID:
             case DoubleType.ID:
             case GeoPointType.ID:
-                return arraysWithoutNullElementsPredicate(reader, ref, getRef);
+                return numValuesPerDocForSortedNumeric(reader, ref, getRef);
+
+            case NumericType.ID: {
+                NumericType numericType = (NumericType) elementType;
+                Integer precision = numericType.numericPrecision();
+                if (precision == null || precision > NumericStorage.COMPACT_PRECISION) {
+                    return numValuesPerDocForSortedSetDocValues(reader, ref, getRef);
+                }
+                return numValuesPerDocForSortedNumeric(reader, ref, getRef);
+            }
+
+            case StringType.ID:
+            case CharacterType.ID:
+            case BitStringType.ID:
+            case IpType.ID:
+                return numValuesPerDocForSortedSetDocValues(reader, ref, getRef);
+
             default:
                 throw new UnsupportedOperationException("NYI: " + elementType);
         }
     }
 
-    private static IntPredicate arraysWithoutNullElementsPredicate(LeafReader reader, Reference reference, Function<ColumnIdent, Reference> getRef) {
-        final SortedNumericDocValues numNonNullTerms;
+    private static IntUnaryOperator numValuesPerDocForSortedSetDocValues(LeafReader reader, Reference ref, Function<ColumnIdent, Reference> getRef) {
+        final SortedSetDocValues numNonNullTerms;
         final SortedNumericDocValues numAllTerms;
         try {
-            numNonNullTerms = DocValues.getSortedNumeric(reader, reference.storageIdent());
-            numAllTerms = DocValues.getSortedNumeric(reader, ArrayIndexer.toArrayLengthFieldName(reference, getRef));
+            numNonNullTerms = DocValues.getSortedSet(reader, ref.storageIdent());
+            numAllTerms = DocValues.getSortedNumeric(reader, ArrayIndexer.toArrayLengthFieldName(ref, getRef));
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
         return doc -> {
             try {
-                return numAllTerms.advanceExact(doc) &&
-                    numNonNullTerms.advanceExact(doc) &&
-                    numAllTerms.nextValue() == numNonNullTerms.docValueCount();
+                return numAllTerms.advanceExact(doc) && numNonNullTerms.advanceExact(doc) ?
+                    Math.toIntExact(numAllTerms.nextValue()) - numNonNullTerms.docValueCount() : -1;
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
         };
     }
 
-    public ArraysWithoutNullElementsQuery(Reference ref, Function<ColumnIdent, Reference> getRef) {
+    private static IntUnaryOperator numValuesPerDocForSortedNumeric(LeafReader reader, Reference ref, Function<ColumnIdent, Reference> getRef) {
+        final SortedNumericDocValues numNonNullTerms;
+        final SortedNumericDocValues numAllTerms;
+        try {
+            numNonNullTerms = DocValues.getSortedNumeric(reader, ref.storageIdent());
+            numAllTerms = DocValues.getSortedNumeric(reader, ArrayIndexer.toArrayLengthFieldName(ref, getRef));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return doc -> {
+            try {
+                return numAllTerms.advanceExact(doc) && numNonNullTerms.advanceExact(doc) ?
+                    Math.toIntExact(numAllTerms.nextValue()) - numNonNullTerms.docValueCount() : -1;
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        };
+    }
+
+    public NumNullTermsPerDocQuery(Reference ref,
+                                   Function<ColumnIdent, Reference> getRef,
+                                   IntPredicate matches) {
         this.ref = ref;
-        this.arraysWithoutNullElementsPredicateFactory = leafReaderContext ->
-            getArraysWithoutNullElementsPredicate(leafReaderContext.reader(), ref, getRef);
+        this.NumNullTermsPerDocFactory = leafReaderContext -> getNumNullTermsPerDocFunction(leafReaderContext.reader(), ref, getRef);
+        this.matches = matches;
     }
 
     @Override
@@ -119,7 +164,7 @@ public class ArraysWithoutNullElementsQuery extends Query {
                     this,
                     0f,
                     scoreMode,
-                    new ArraysWithoutNullElementsIterator(context.reader(), arraysWithoutNullElementsPredicateFactory.apply(context)));
+                    new NumNullTermsPerDocQuery.NumNullTermsPerDocTwoPhaseIterator(context.reader(), NumNullTermsPerDocFactory.apply(context), matches));
             }
         };
     }
@@ -133,34 +178,41 @@ public class ArraysWithoutNullElementsQuery extends Query {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
 
-        ArraysWithoutNullElementsQuery that = (ArraysWithoutNullElementsQuery) o;
+        NumNullTermsPerDocQuery that = (NumNullTermsPerDocQuery) o;
 
-        return arraysWithoutNullElementsPredicateFactory.equals(that.arraysWithoutNullElementsPredicateFactory);
+        if (!NumNullTermsPerDocFactory.equals(that.NumNullTermsPerDocFactory)) return false;
+        return matches.equals(that.matches);
     }
 
     @Override
     public int hashCode() {
-        return arraysWithoutNullElementsPredicateFactory.hashCode();
+        int result = NumNullTermsPerDocFactory.hashCode();
+        result = 31 * result + matches.hashCode();
+        return result;
     }
 
     @Override
     public String toString(String field) {
-        return "ArraysWithoutNullElementsQuery: " + ref;
+        return "NumNullTermsPerDoc: " + ref;
     }
 
-    static class ArraysWithoutNullElementsIterator extends TwoPhaseIterator {
+    static class NumNullTermsPerDocTwoPhaseIterator extends TwoPhaseIterator {
 
-        private final IntPredicate arraysWithoutNullElements;
+        private final IntUnaryOperator NumNullTermsOfDoc;
+        private final IntPredicate matches;
 
-        ArraysWithoutNullElementsIterator(LeafReader reader, IntPredicate arraysWithoutNullElements) {
+        NumNullTermsPerDocTwoPhaseIterator(LeafReader reader,
+                                              IntUnaryOperator NumNullTermsOfDoc,
+                                              IntPredicate matches) {
             super(DocIdSetIterator.all(reader.maxDoc()));
-            this.arraysWithoutNullElements = arraysWithoutNullElements;
+            this.NumNullTermsOfDoc = NumNullTermsOfDoc;
+            this.matches = matches;
         }
 
         @Override
         public boolean matches() {
             int doc = approximation.docID();
-            return arraysWithoutNullElements.test(doc);
+            return matches.test(NumNullTermsOfDoc.applyAsInt(doc));
         }
 
         @Override

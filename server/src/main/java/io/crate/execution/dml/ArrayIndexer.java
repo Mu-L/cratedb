@@ -37,7 +37,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.VisibleForTesting;
 
-import io.crate.expression.scalar.ArraysWithoutNullElementsQuery;
+import io.crate.expression.scalar.NumNullTermsPerDocQuery;
 import io.crate.metadata.ColumnIdent;
 import io.crate.metadata.Reference;
 import io.crate.metadata.table.TableInfo;
@@ -57,12 +57,8 @@ public class ArrayIndexer<T> implements ValueIndexer<List<T>> {
         return new FieldExistsQuery(toArrayLengthFieldName(arrayRef, getRef));
     }
 
-    public static Query arraysWithAtLeastOneNonNullElementQuery(Reference arrayRef) {
-        return new FieldExistsQuery(arrayRef.storageIdent());
-    }
-
     public static Query arraysWithoutNullElementsQuery(Reference arrayRef, Function<ColumnIdent, Reference> getRef) {
-        return new ArraysWithoutNullElementsQuery(arrayRef, getRef);
+        return new NumNullTermsPerDocQuery(arrayRef, getRef, nullElementCount -> nullElementCount == 0);
     }
 
     public static String toArrayLengthFieldName(Reference arrayRef, Function<ColumnIdent, Reference> getRef) {
