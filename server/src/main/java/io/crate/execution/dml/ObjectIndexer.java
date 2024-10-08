@@ -96,11 +96,13 @@ public class ObjectIndexer implements ValueIndexer<Map<String, Object>> {
             Child child = entry.getValue();
             Object innerValue = null;
             if (value.containsKey(innerName) == false) {
+                // Generated value is not provided, nothing to check, use generated value.
                 innerValue = docBuilder.getSyntheticValue(child.ident());
             } else {
                 innerValue = value.get(innerName);
+                docBuilder.checkColumnConstraint(child.ident(), innerValue);
             }
-            docBuilder.checkColumnConstraint(child.ident(), innerValue);
+
             if (innerValue == null) {
                 continue;
             }
