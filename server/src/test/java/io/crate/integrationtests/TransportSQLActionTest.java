@@ -28,6 +28,7 @@ import static io.crate.testing.Asserts.assertThat;
 import static io.crate.testing.TestingHelpers.printedTable;
 import static io.netty.handler.codec.http.HttpResponseStatus.BAD_REQUEST;
 import static io.netty.handler.codec.http.HttpResponseStatus.NOT_FOUND;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.fail;
 
@@ -74,7 +75,7 @@ import io.crate.testing.UseRandomizedSchema;
 import io.crate.types.DataType;
 import io.crate.types.DataTypes;
 
-@IntegTestCase.ClusterScope(minNumDataNodes = 2)
+@IntegTestCase.ClusterScope(minNumDataNodes = 1, numClientNodes = 0, supportsDedicatedMasters = false)
 public class TransportSQLActionTest extends IntegTestCase {
 
     private final Setup setup = new Setup(sqlExecutor);

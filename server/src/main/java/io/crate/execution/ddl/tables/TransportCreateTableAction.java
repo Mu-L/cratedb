@@ -25,7 +25,9 @@ import static org.elasticsearch.cluster.metadata.MetadataCreateIndexService.setI
 import static org.elasticsearch.cluster.metadata.MetadataCreateIndexService.validateSoftDeletesSetting;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ActionType;
 import org.elasticsearch.action.admin.indices.create.TransportCreateIndexAction;
@@ -37,7 +39,9 @@ import org.elasticsearch.cluster.ack.ClusterStateUpdateResponse;
 import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
+import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.cluster.metadata.MetadataCreateIndexService;
+import org.elasticsearch.cluster.metadata.RelationMetadata;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.inject.Inject;
@@ -49,6 +53,7 @@ import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 
+import io.crate.common.collections.Lists;
 import io.crate.exceptions.RelationAlreadyExists;
 import io.crate.execution.ddl.Templates;
 import io.crate.metadata.RelationName;
@@ -168,16 +173,48 @@ public class TransportCreateTableAction extends TransportMasterNodeAction<Create
 
             @Override
             public ClusterState execute(ClusterState currentState) throws Exception {
-                if (isPartitioned) {
-                    return Templates.add(
+                ClusterState newState = isPartitioned
+                    ? Templates.add(
                         indicesService,
                         createIndexService,
                         currentState,
                         request,
-                        normalizedSettings
-                    );
-                }
-                return createIndexService.add(currentState, request, normalizedSettings);
+                        normalizedSettings)
+                    : createIndexService.add(currentState, request, normalizedSettings);
+
+                Settings settings = Settings.builder()
+                    .put(request.settings())
+                    .put(IndexMetadata.SETTING_VERSION_CREATED, Version.CURRENT)
+                    .build();
+
+                // TODO:
+                //  - Adapt/remove above logic
+                //  - some settings are index level settings, not table level
+                //  - routingColumn default - who resolves it?
+                Metadata.Builder newMetadata = Metadata.builder(newState.metadata());
+                AtomicInteger positions = new AtomicInteger(0);
+                newMetadata
+                    .addRelation(new RelationMetadata.Table(
+                        relationName,
+                        Lists.map(
+                            request.references(),
+                            ref -> ref.withOidAndPosition(
+                                newMetadata.columnOidSupplier(),
+                                positions::incrementAndGet
+                            )
+                        ),
+                        settings,
+                        request.routingColumn(),
+                        request.tableColumnPolicy(),
+                        request.pkConstraintName(),
+                        request.checkConstraints(),
+                        request.primaryKeys(),
+                        request.partitionedBy()
+                    ));
+                Metadata metadata = newMetadata.build();
+                return ClusterState.builder(newState)
+                    .metadata(metadata)
+                    .build();
             }
         };
         clusterService.submitStateUpdateTask("create-table", createTableTask);

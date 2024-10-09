@@ -24,6 +24,7 @@ package io.crate.metadata.doc;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -42,6 +43,7 @@ import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.metadata.IndexTemplateMetadata;
 import org.elasticsearch.cluster.metadata.MappingMetadata;
 import org.elasticsearch.cluster.metadata.Metadata;
+import org.elasticsearch.cluster.metadata.RelationMetadata;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.IndexNotFoundException;
@@ -202,6 +204,7 @@ public class DocTableInfoFactory {
     }
 
     public DocTableInfo create(RelationName relation, Metadata metadata) {
+        RelationMetadata relationMetadata = metadata.getRelation(relation);
         String templateName = PartitionName.templateName(relation.schema(), relation.name());
         IndexTemplateMetadata indexTemplateMetadata = metadata.templates().get(templateName);
         Version versionCreated;
@@ -308,7 +311,7 @@ public class DocTableInfoFactory {
         );
         PublicationsMetadata publicationsMetadata = metadata.custom(PublicationsMetadata.TYPE);
         ColumnIdent clusteredBy = getClusteredBy(primaryKeys, Maps.get(metaMap, "routing"));
-        return new DocTableInfo(
+        DocTableInfo oldTableInfo = new DocTableInfo(
             relation,
             references,
             indexColumns.entrySet().stream()
@@ -330,6 +333,43 @@ public class DocTableInfoFactory {
                 publicationsMetadata == null ? false : publicationsMetadata.isPublished(relation)
             ),
             tableVersion
+        );
+        if (relationMetadata instanceof RelationMetadata.Table table) {
+            DocTableInfo newTableInfo = tableFromRelationMetadata(table);
+            return newTableInfo;
+        }
+        return oldTableInfo;
+    }
+
+    private DocTableInfo tableFromRelationMetadata(RelationMetadata.Table table) {
+        Map<ColumnIdent, Reference> columns = table.columns().stream()
+            .collect(Collectors.toMap(ref -> ref.column(), ref -> ref));
+
+        Version versionCreated = IndexMetadata.SETTING_INDEX_VERSION_CREATED.get(table.settings());
+        Version versionUpgraded = table.settings().getAsVersion(IndexMetadata.SETTING_VERSION_UPGRADED, null);
+        ColumnIdent routingColumn = table.routingColumn();
+        if (routingColumn == null) {
+            routingColumn = table.primaryKeys().size() == 1
+                ? table.primaryKeys().get(0)
+                : SysColumns.ID.COLUMN;
+        }
+        return new DocTableInfo(
+            table.name(),
+            columns,
+            Map.of(),
+            Map.of(),
+            table.pkConstraintName(),
+            table.primaryKeys(),
+            List.of(), // table.checkConstraints()
+            routingColumn,
+            table.settings(),
+            table.partitionedBy(),
+            table.columnPolicy(),
+            versionCreated,
+            versionUpgraded,
+            false,
+            EnumSet.allOf(Operation.class),
+            0
         );
     }
 

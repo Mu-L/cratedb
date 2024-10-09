@@ -52,7 +52,9 @@ import org.elasticsearch.Assertions;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.cluster.metadata.Metadata;
+import org.elasticsearch.cluster.metadata.SchemaMetadata;
 import org.elasticsearch.cluster.routing.ShardRouting;
+import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.Setting.Property;
 import org.elasticsearch.common.settings.Settings;
@@ -498,6 +500,7 @@ public class IndexService extends AbstractIndexComponent implements IndicesClust
         if (IndexName.isDangling(indexName)) {
             return;
         }
+        ImmutableOpenMap<String, SchemaMetadata> schemas = metadata.schemas();
         var tableInfo = tableFactory.create(RelationName.fromIndexName(indexName), metadata);
         this.getTranslogIndexer = () -> new TranslogIndexer(tableInfo);
     }
