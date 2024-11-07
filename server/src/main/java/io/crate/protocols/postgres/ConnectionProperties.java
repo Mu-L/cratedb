@@ -23,6 +23,7 @@ package io.crate.protocols.postgres;
 
 import java.net.InetAddress;
 import java.security.cert.Certificate;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -41,6 +42,7 @@ public class ConnectionProperties {
     private final boolean hasSSL;
     private final List<ClientMethod> clientMethods;
     private final Certificate certificate;
+    private final Duration jwtKeyExpiration;
 
     public enum ClientMethod {
         CERT,
@@ -53,9 +55,18 @@ public class ConnectionProperties {
                                 InetAddress address,
                                 Protocol protocol,
                                 @Nullable SSLSession sslSession) {
+        this(credentials, address, protocol, sslSession, null);
+    }
+
+    public ConnectionProperties(@Nullable Credentials credentials,
+                                InetAddress address,
+                                Protocol protocol,
+                                @Nullable SSLSession sslSession,
+                                @Nullable Duration jwtKeyExpiration) {
         this.address = address;
         this.protocol = protocol;
         this.hasSSL = sslSession != null;
+        this.jwtKeyExpiration = jwtKeyExpiration;
         Certificate cert = null;
         if (sslSession != null) {
             try {
@@ -108,5 +119,10 @@ public class ConnectionProperties {
     @Nullable
     public Certificate clientCert() {
         return certificate;
+    }
+
+    @Nullable
+    public Duration jwtKeyExpiration() {
+        return jwtKeyExpiration;
     }
 }

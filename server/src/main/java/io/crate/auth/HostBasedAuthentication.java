@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import org.apache.logging.log4j.LogManager;
@@ -40,6 +41,8 @@ import org.elasticsearch.common.network.InetAddresses;
 import org.elasticsearch.common.settings.Settings;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.VisibleForTesting;
+
+import com.auth0.jwk.JwkProvider;
 
 import io.crate.protocols.postgres.ConnectionProperties;
 import io.crate.role.Roles;
@@ -122,6 +125,9 @@ public class HostBasedAuthentication implements Authentication {
 
     private final Supplier<String> clusterId;
 
+    // JwkProvider are cached to reused in JWTAuthenticationMethod and create on per-invocation base
+    private final ConcurrentHashMap<String, JwkProvider> cachedJwkProviders = new ConcurrentHashMap<>();
+
     public HostBasedAuthentication(Settings settings,
                                    Roles roles,
                                    DnsResolver dnsResolver,
@@ -153,6 +159,7 @@ public class HostBasedAuthentication implements Authentication {
                 new JWTAuthenticationMethod(
                     roles,
                     settings,
+                    cachedJwkProviders,
                     JWTAuthenticationMethod::jwkProvider,
                     clusterId
                 );

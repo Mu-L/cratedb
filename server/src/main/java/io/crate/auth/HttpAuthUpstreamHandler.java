@@ -28,6 +28,7 @@ import static io.netty.buffer.Unpooled.copiedBuffer;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.cert.Certificate;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Predicate;
@@ -119,7 +120,8 @@ public class HttpAuthUpstreamHandler extends SimpleChannelInboundHandler<Object>
         }
 
         InetAddress address = addressFromRequestOrChannel(request, ctx.channel());
-        ConnectionProperties connectionProperties = new ConnectionProperties(credentials, address, Protocol.HTTP, session);
+        Duration maxAge = cacheControlMaxAgeFromRequest(request);
+        ConnectionProperties connectionProperties = new ConnectionProperties(credentials, address, Protocol.HTTP, session, maxAge);
 
         AuthenticationMethod authMethod = authService.resolveAuthenticationType(username, connectionProperties);
         if (authMethod == null) {
@@ -147,6 +149,26 @@ public class HttpAuthUpstreamHandler extends SimpleChannelInboundHandler<Object>
                 credentials.close();
             }
         }
+    }
+
+    @VisibleForTesting
+    @Nullable
+    static Duration cacheControlMaxAgeFromRequest(HttpRequest request) {
+        String cacheControl = request.headers().get(HttpHeaderNames.CACHE_CONTROL.toString());
+        if (cacheControl != null) {
+            if (cacheControl.startsWith("max-age=")) {
+                String value = cacheControl.substring(cacheControl.indexOf("=") + 1);
+                try {
+                    int seconds = Integer.parseInt(value);
+                    if (seconds > 0) {
+                        return Duration.ofSeconds(seconds);
+                    }
+                } catch (NumberFormatException ignore) {
+                    LOGGER.warn("Invalid Header cache-control value '{}' ignored.", cacheControl);
+                }
+            }
+        }
+        return null;
     }
 
     private void handleHttpChunk(ChannelHandlerContext ctx, HttpContent msg) {

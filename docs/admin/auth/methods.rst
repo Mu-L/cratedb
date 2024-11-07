@@ -156,6 +156,13 @@ It's recommended to have the ``alg`` (`Algorithm parameter`_)  in the header.
 If it's provided both in the token and in the response from the JWK endpoint,
 both values are compared and in case of a mismatch the token is rejected.
 
+JWT authentication requires retrieving public keys from JWK endpoints. These
+public keys can be cached by CrateDB by setting ``cache-control: max-age``
+in the header of the request. If it's provided, once the public keys are
+requested for the first time will be cached for the given time. The value
+has to be defined in seconds and must be a positive integer otherwise it will
+be ignored.
+
 .. NOTE::
 
    JWT is supported only for the HTTP protocol. An :ref:`HBA <admin_hba>` entry

@@ -30,8 +30,10 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.security.PublicKey;
 import java.security.interfaces.RSAPublicKey;
+import java.time.Duration;
 import java.util.Locale;
-import java.util.function.Function;
+import java.util.Map;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 import org.elasticsearch.common.settings.Settings;
@@ -58,7 +60,8 @@ public class JWTAuthenticationMethod implements AuthenticationMethod {
 
     private final Roles roles;
 
-    private final Function<String, JwkProvider> urlToJwkProvider;
+    private final BiFunction<String, Duration, JwkProvider> jwkProvider;
+    private final Map<String, JwkProvider> cachedJwkProviders;
 
     private final Supplier<String> clusterId;
 
@@ -67,16 +70,18 @@ public class JWTAuthenticationMethod implements AuthenticationMethod {
 
     public JWTAuthenticationMethod(Roles roles,
                                    Settings settings,
-                                   Function<String, JwkProvider> urlToJwkProvider,
+                                   Map<String, JwkProvider> cachedJwkProviders,
+                                   BiFunction<String, Duration, JwkProvider> jwkProvider,
                                    Supplier<String> clusterId) {
         this.roles = roles;
         this.settings = settings;
-        this.urlToJwkProvider = urlToJwkProvider;
+        this.jwkProvider = jwkProvider;
+        this.cachedJwkProviders = cachedJwkProviders;
         this.clusterId = clusterId;
     }
 
     @Override
-    public @Nullable Role authenticate(Credentials credentials, ConnectionProperties connProperties) {
+    public @Nullable Role authenticate(Credentials credentials, @Nullable ConnectionProperties connProperties) {
         var username = credentials.username();
         assert username != null : "User name must be resolved before authentication attempt";
         var decodedJWT = credentials.decodedToken();
@@ -102,7 +107,9 @@ public class JWTAuthenticationMethod implements AuthenticationMethod {
                 audience = jwtProperties.aud() != null ? jwtProperties.aud() : audience;
             }
 
-            JwkProvider jwkProvider = urlToJwkProvider.apply(issuer);
+            Duration jwtCacheDuration = connProperties.jwtKeyExpiration();
+            JwkProvider jwkProvider = cachedJwkProviders.computeIfAbsent(issuer, x -> this.jwkProvider.apply(x, jwtCacheDuration));
+
             // Expiration date is checked by default(if provided in token)
             Algorithm algorithm = resolveAlgorithm(jwkProvider, decodedJWT);
             Verification verification = JWT.require(algorithm)
@@ -130,8 +137,7 @@ public class JWTAuthenticationMethod implements AuthenticationMethod {
         return user;
     }
 
-
-    public static JwkProvider jwkProvider(@NotNull String issuer) {
+    public static JwkProvider jwkProvider(@NotNull String issuer, @Nullable Duration ttl) {
         URL jwkUrl;
         try {
             /*
@@ -149,9 +155,13 @@ public class JWTAuthenticationMethod implements AuthenticationMethod {
         } catch (MalformedURLException | URISyntaxException e) {
             throw new IllegalArgumentException("Invalid jwks uri", e);
         }
-
-        return new JwkProviderBuilder(jwkUrl).build();
+        JwkProviderBuilder jwkProviderBuilder = new JwkProviderBuilder(jwkUrl);
+        if (ttl != null) {
+            jwkProviderBuilder.cached(5, ttl);
+        }
+        return jwkProviderBuilder.build();
     }
+
 
     @Override
     public String name() {
