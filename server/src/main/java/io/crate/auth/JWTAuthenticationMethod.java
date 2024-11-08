@@ -24,16 +24,12 @@ package io.crate.auth;
 import static io.crate.auth.AuthSettings.AUTH_HOST_BASED_JWT_AUD_SETTING;
 import static io.crate.auth.AuthSettings.AUTH_HOST_BASED_JWT_ISS_SETTING;
 
-import java.net.MalformedURLException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.URL;
 import java.security.PublicKey;
 import java.security.interfaces.RSAPublicKey;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
-import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.elasticsearch.common.settings.Settings;
@@ -43,7 +39,6 @@ import org.jetbrains.annotations.Nullable;
 import com.auth0.jwk.Jwk;
 import com.auth0.jwk.JwkException;
 import com.auth0.jwk.JwkProvider;
-import com.auth0.jwk.JwkProviderBuilder;
 import com.auth0.jwt.JWT;
 import com.auth0.jwt.JWTVerifier;
 import com.auth0.jwt.algorithms.Algorithm;
@@ -60,7 +55,7 @@ public class JWTAuthenticationMethod implements AuthenticationMethod {
 
     private final Roles roles;
 
-    private final BiFunction<String, Duration, JwkProvider> jwkProvider;
+    private final Function<String, JwkProvider> jwkProvider;
     private final Map<String, JwkProvider> cachedJwkProviders;
 
     private final Supplier<String> clusterId;
@@ -71,7 +66,7 @@ public class JWTAuthenticationMethod implements AuthenticationMethod {
     public JWTAuthenticationMethod(Roles roles,
                                    Settings settings,
                                    Map<String, JwkProvider> cachedJwkProviders,
-                                   BiFunction<String, Duration, JwkProvider> jwkProvider,
+                                   Function<String, JwkProvider> jwkProvider,
                                    Supplier<String> clusterId) {
         this.roles = roles;
         this.settings = settings;
@@ -81,7 +76,7 @@ public class JWTAuthenticationMethod implements AuthenticationMethod {
     }
 
     @Override
-    public @Nullable Role authenticate(Credentials credentials, @Nullable ConnectionProperties connProperties) {
+    public @Nullable Role authenticate(Credentials credentials, ConnectionProperties connProperties) {
         var username = credentials.username();
         assert username != null : "User name must be resolved before authentication attempt";
         var decodedJWT = credentials.decodedToken();
@@ -106,10 +101,7 @@ public class JWTAuthenticationMethod implements AuthenticationMethod {
                 name = jwtProperties.username();
                 audience = jwtProperties.aud() != null ? jwtProperties.aud() : audience;
             }
-
-            Duration jwtCacheDuration = connProperties.jwtKeyExpiration();
-            JwkProvider jwkProvider = cachedJwkProviders.computeIfAbsent(issuer, x -> this.jwkProvider.apply(x, jwtCacheDuration));
-
+            JwkProvider jwkProvider = cachedJwkProviders.computeIfAbsent(issuer, this.jwkProvider::apply);
             // Expiration date is checked by default(if provided in token)
             Algorithm algorithm = resolveAlgorithm(jwkProvider, decodedJWT);
             Verification verification = JWT.require(algorithm)
@@ -137,31 +129,9 @@ public class JWTAuthenticationMethod implements AuthenticationMethod {
         return user;
     }
 
-    public static JwkProvider jwkProvider(@NotNull String issuer, @Nullable Duration ttl) {
-        URL jwkUrl;
-        try {
-            /*
-             We cannot use JwkProviderBuilder constructor with String.
-             It adds hard coded WELL_KNOWN_JWKS_PATH (/.well-known/jwks.json) to the url.
-             JWK URL not necessarily ends with that suffix, for example:
-             Microsoft: "jwks_uri":" https://login.microsoftonline.com/common/discovery/v2.0/keys"
-             Google: "jwks_uri": "https://www.googleapis.com/oauth2/v3/certs",
-             Taken from https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration
-             and https://accounts.google.com/.well-known/openid-configuration correspondingly
-            */
-
-            URI uri = new URI(issuer).normalize();
-            jwkUrl = uri.toURL();
-        } catch (MalformedURLException | URISyntaxException e) {
-            throw new IllegalArgumentException("Invalid jwks uri", e);
-        }
-        JwkProviderBuilder jwkProviderBuilder = new JwkProviderBuilder(jwkUrl);
-        if (ttl != null) {
-            jwkProviderBuilder.cached(5, ttl);
-        }
-        return jwkProviderBuilder.build();
+    public static JwkProvider jwkProvider(String jwkUrl) {
+        return new CachingJwkProvider(jwkUrl, Duration.ofHours(10));
     }
-
 
     @Override
     public String name() {

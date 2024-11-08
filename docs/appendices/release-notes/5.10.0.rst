@@ -110,9 +110,7 @@ Performance and Resilience Improvements
 Administration and Operations
 -----------------------------
 
-- Added caching for public keys from JWK endpoints for JWT authentication.
-  By adding the http header ``cache-control: max-age`` the public keys
-  once requested will be cached for the given time. See
+- Added caching for public keys from JWK endpoints for JWT authentication. See
   :ref:`JWT authentication method <auth_jwt>` for more details.
 
 - Added node settings for the :ref:`jwt_defaults` allowing to provide global

@@ -40,7 +40,6 @@ import java.security.spec.EncodedKeySpec;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
@@ -50,9 +49,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.BiFunction;
+import java.util.function.Function;
 
-import org.elasticsearch.common.network.InetAddresses;
 import org.elasticsearch.common.settings.SecureString;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.test.ESTestCase;
@@ -63,7 +61,6 @@ import com.auth0.jwk.JwkProvider;
 import com.auth0.jwt.JWT;
 import com.auth0.jwt.algorithms.Algorithm;
 
-import io.crate.protocols.postgres.ConnectionProperties;
 import io.crate.role.JwtProperties;
 import io.crate.role.Role;
 import io.crate.role.Roles;
@@ -72,12 +69,6 @@ import io.crate.role.SecureHash;
 public class UserAuthenticationMethodTest extends ESTestCase {
 
     private static final String KID = "1";
-
-    static ConnectionProperties CONNECTION_PROPERTIES = new ConnectionProperties(
-        new Credentials("crate", null),
-        InetAddresses.forString("127.0.0.1"),
-        Protocol.POSTGRES,
-        null);
 
 
     private static class CrateOrNullRoles implements Roles {
@@ -128,7 +119,7 @@ public class UserAuthenticationMethodTest extends ESTestCase {
         PasswordAuthenticationMethod pwAuth = new PasswordAuthenticationMethod(new CrateOrNullRoles());
         assertThat(pwAuth.name()).isEqualTo("password");
 
-        assertThatThrownBy(() -> pwAuth.authenticate(new Credentials("crate", "wrong".toCharArray()), CONNECTION_PROPERTIES))
+        assertThatThrownBy(() -> pwAuth.authenticate(new Credentials("crate", "wrong".toCharArray()), null))
             .hasMessage("password authentication failed for user \"crate\"");
 
     }
@@ -136,18 +127,17 @@ public class UserAuthenticationMethodTest extends ESTestCase {
     @Test
     public void testPasswordAuthenticationForNonExistingUser() throws Exception {
         PasswordAuthenticationMethod pwAuth = new PasswordAuthenticationMethod(new CrateOrNullRoles());
-        assertThatThrownBy(() -> pwAuth.authenticate(new Credentials("cr8", "pw".toCharArray()), CONNECTION_PROPERTIES))
+        assertThatThrownBy(() -> pwAuth.authenticate(new Credentials("cr8", "pw".toCharArray()), null))
             .hasMessage("password authentication failed for user \"cr8\"");
     }
 
     @Test
     public void test_jwt_authentication() throws Exception {
         Roles roles = () -> List.of(JWT_USER);
-        HashMap<String, JwkProvider> cache = new HashMap<>();
         JWTAuthenticationMethod jwtAuth = new JWTAuthenticationMethod(
             roles,
             Settings.EMPTY,
-            cache,
+            new HashMap<>(),
             jwkProviderFunction(null),
             () -> "dummy"
         );
@@ -157,12 +147,9 @@ public class UserAuthenticationMethodTest extends ESTestCase {
         assertThat(credentials.username()).isNull();
         credentials.setUsername(JWT_USER.name());
 
-        Role authenticatedRole = jwtAuth.authenticate(credentials, CONNECTION_PROPERTIES);
+        Role authenticatedRole = jwtAuth.authenticate(credentials, null);
         assertThat(authenticatedRole).isNotNull();
         assertThat(authenticatedRole.name()).isEqualTo(JWT_USER.name());
-        // Assure sure JwkProvider for the given iss is cached
-        assertThat(cache).isNotEmpty();
-        assertThat(cache).containsKey(JWT_USER.jwtProperties().iss());
     }
 
     @Test
@@ -190,7 +177,7 @@ public class UserAuthenticationMethodTest extends ESTestCase {
         Credentials credentials = new Credentials(JWT_TOKEN);
         credentials.setUsername(JWT_USER.name());
 
-        Role authenticatedRole = jwtAuth.authenticate(credentials, CONNECTION_PROPERTIES);
+        Role authenticatedRole = jwtAuth.authenticate(credentials, null);
         assertThat(authenticatedRole.name()).isEqualTo(JWT_USER.name());
     }
 
@@ -220,7 +207,7 @@ public class UserAuthenticationMethodTest extends ESTestCase {
         credentials.setUsername(JWT_USER.name());
 
         assertThatThrownBy(
-            () -> jwtAuth.authenticate(credentials, CONNECTION_PROPERTIES))
+            () -> jwtAuth.authenticate(credentials, null))
             .isExactlyInstanceOf(RuntimeException.class)
             .hasMessageContaining("jwt authentication failed for user John. Reason: The Claim 'aud' value doesn't contain the required audience.");
     }
@@ -256,7 +243,7 @@ public class UserAuthenticationMethodTest extends ESTestCase {
         credentials.setUsername(JWT_USER.name());
 
         assertThatThrownBy(
-                () -> jwtAuth.authenticate(credentials, CONNECTION_PROPERTIES))
+                () -> jwtAuth.authenticate(credentials, null))
             .isExactlyInstanceOf(RuntimeException.class)
             .hasMessageContaining("jwt authentication failed for user John. Reason: The Token has expired");
     }
@@ -289,7 +276,7 @@ public class UserAuthenticationMethodTest extends ESTestCase {
         credentials.setUsername(JWT_USER.name());
 
         assertThatThrownBy(
-            () -> jwtAuth.authenticate(credentials, CONNECTION_PROPERTIES))
+            () -> jwtAuth.authenticate(credentials, null))
             .isExactlyInstanceOf(RuntimeException.class)
             .hasMessageContaining("jwt authentication failed for user John. Reason: The Claim 'aud' is not present in the JWT.");
     }
@@ -311,7 +298,7 @@ public class UserAuthenticationMethodTest extends ESTestCase {
         credentials.setUsername(JWT_USER.name());
 
         assertThatThrownBy(
-            () -> jwtAuth.authenticate(credentials, CONNECTION_PROPERTIES))
+            () -> jwtAuth.authenticate(credentials, null))
             .isExactlyInstanceOf(RuntimeException.class)
             .hasMessage("jwt authentication failed for user John. Reason: Jwt token has algorithm not matching with the algorithm of the public key.");
     }
@@ -368,7 +355,7 @@ public class UserAuthenticationMethodTest extends ESTestCase {
         credentials.setUsername(JWT_USER.name());
 
         assertThatThrownBy(
-            () -> jwtAuth.authenticate(credentials, CONNECTION_PROPERTIES))
+            () -> jwtAuth.authenticate(credentials, null))
             .isExactlyInstanceOf(RuntimeException.class)
             .hasMessage("jwt authentication failed for user \"John\"");
     }
@@ -398,7 +385,7 @@ public class UserAuthenticationMethodTest extends ESTestCase {
         credentials.setUsername(JWT_USER.name());
 
         assertThatThrownBy(
-            () -> jwtAuth.authenticate(credentials, CONNECTION_PROPERTIES))
+            () -> jwtAuth.authenticate(credentials, null))
             .isExactlyInstanceOf(RuntimeException.class)
             .hasMessage("jwt authentication failed for user John. Reason: The Claim 'iss' value doesn't match the required issuer.");
     }
@@ -420,7 +407,6 @@ public class UserAuthenticationMethodTest extends ESTestCase {
             // Matches JWT_TOKEN payload.
             .put(AuthSettings.AUTH_HOST_BASED_JWT_AUD_SETTING.getKey(), "test_cluster_id")
             .build();
-
         JWTAuthenticationMethod jwtAuth = new JWTAuthenticationMethod(
             roles,
             settings,
@@ -432,12 +418,12 @@ public class UserAuthenticationMethodTest extends ESTestCase {
         Credentials credentials = new Credentials(JWT_TOKEN);
         credentials.setUsername(tokenUsername);
 
-        Role authenticatedRole = jwtAuth.authenticate(credentials, CONNECTION_PROPERTIES);
+        Role authenticatedRole = jwtAuth.authenticate(credentials, null);
         assertThat(authenticatedRole).isNotNull();
         assertThat(authenticatedRole.name()).isEqualTo(tokenUsername);
     }
 
-    private static BiFunction<String, Duration, JwkProvider> jwkProviderFunction(String algorithm) throws Exception {
+    private static Function<String, JwkProvider> jwkProviderFunction(String algorithm) throws Exception {
         EncodedKeySpec publicKeySpec = new X509EncodedKeySpec(Base64.getDecoder().decode(PUBLIC_KEY_256));
         KeyFactory keyFactory = KeyFactory.getInstance("RSA");
         PublicKey publicKey = keyFactory.generatePublic(publicKeySpec);
@@ -449,6 +435,6 @@ public class UserAuthenticationMethodTest extends ESTestCase {
         when(mockJwkProvider.get(KID)).thenReturn(mockJwk);
         when(mockJwk.getPublicKey()).thenReturn(publicKey);
         when(mockJwk.getAlgorithm()).thenReturn(algorithm);
-        return (ignored, parameters) -> mockJwkProvider;
+        return ignored -> mockJwkProvider;
     }
 }

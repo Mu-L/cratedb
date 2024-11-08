@@ -34,7 +34,6 @@ import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
 import java.security.cert.Certificate;
-import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 
@@ -345,39 +344,6 @@ public class HttpAuthUpstreamHandlerTest extends ESTestCase {
         ch.writeInbound(request2);
         ch.releaseInbound();
         verify(jwtAuth, times(1)).authenticate(any(Credentials.class), any(ConnectionProperties.class));
-    }
-
-    @Test
-    public void test_get_cache_control_max_age_from_request() throws Exception {
-        HttpRequest request = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/_sql");
-        request.headers().add(HttpHeaderNames.CACHE_CONTROL.toString(), "max-age=1000");
-
-        var duration = HttpAuthUpstreamHandler.cacheControlMaxAgeFromRequest(request);
-        assertThat(duration).isEqualTo(Duration.ofSeconds(1000));
-
-        request = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/_sql");
-        request.headers().add(HttpHeaderNames.CACHE_CONTROL.toString(), "max-age=wrong");
-
-        duration = HttpAuthUpstreamHandler.cacheControlMaxAgeFromRequest(request);
-        assertThat(duration).isNull();
-
-        request = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/_sql");
-        request.headers().add(HttpHeaderNames.CACHE_CONTROL.toString(), "max-age=-1");
-
-        duration = HttpAuthUpstreamHandler.cacheControlMaxAgeFromRequest(request);
-        assertThat(duration).isNull();
-
-        request = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/_sql");
-        request.headers().add(HttpHeaderNames.CACHE_CONTROL.toString(), "max-age=1.1");
-
-        duration = HttpAuthUpstreamHandler.cacheControlMaxAgeFromRequest(request);
-        assertThat(duration).isNull();
-
-        request = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/_sql");
-        request.headers().add(HttpHeaderNames.CACHE_CONTROL.toString(), "max-age=0");
-
-        duration = HttpAuthUpstreamHandler.cacheControlMaxAgeFromRequest(request);
-        assertThat(duration).isNull();
     }
 
 }

@@ -125,7 +125,8 @@ public class HostBasedAuthentication implements Authentication {
 
     private final Supplier<String> clusterId;
 
-    // JwkProvider are cached to reused in JWTAuthenticationMethod and create on per-invocation base
+    // JWT token is checked for each connection therefore we are caching JwkProvider for each issuer,
+    // so that each new JWTAuthenticationMethod can re-use JwkProvider from the cache
     private final ConcurrentHashMap<String, JwkProvider> cachedJwkProviders = new ConcurrentHashMap<>();
 
     public HostBasedAuthentication(Settings settings,
