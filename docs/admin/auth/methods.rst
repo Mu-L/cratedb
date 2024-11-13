@@ -157,9 +157,10 @@ If it's provided both in the token and in the response from the JWK endpoint,
 both values are compared and in case of a mismatch the token is rejected.
 
 JWT authentication requires retrieving public keys from a `JWK endpoint`_.
-These public keys can be cached by CrateDB by setting ``Cache-Control: max-age``
-in the header of the response. The value has to be defined in seconds and must
-be a positive integer otherwise it will be ignored.
+These public keys will be cached by CrateDB for 10 hours or by retrieving
+``Cache-Control: max-age`` from the header of the response from the `JWK endpoint`_.
+The value has to be defined in seconds and must be a positive integer otherwise
+it will be ignored.
 
 .. NOTE::
 
