@@ -110,7 +110,6 @@ public class HttpTestServer {
      * @param port the port to listen on
      * @param fail of set to true, the server will emit error responses
      * @param requestHandler is function to transform incoming messages to some custom output, written to a pre-configured json generator.
-     * @param headers Http headers which are attached to the response
      * It MUST propagate any exception to the server so that server can set status to 500.
      */
     public HttpTestServer(int port, boolean fail, BiConsumer<HttpRequest, JsonGenerator> requestHandler) {
