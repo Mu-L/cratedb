@@ -91,8 +91,7 @@ public class CachingJwkProvider implements JwkProvider {
         this.connectTimeout = connectTimeout;
         this.readTimeout = readTimeout;
         this.reader = new ObjectMapper().readerFor(Map.class);
-        this.headers = (headers == null) ?
-            Collections.singletonMap("Accept", "application/json") : headers;
+        this.headers = (headers == null) ? Collections.singletonMap("Accept", "application/json") : headers;
         this.cacheExpirationTime = cacheExpirationTime;
         this.cache = Caffeine.newBuilder()
             .maximumSize(5)
@@ -156,9 +155,9 @@ public class CachingJwkProvider implements JwkProvider {
 
             try (InputStream inputStream = c.getInputStream()) {
                 Map<String, Object> result = reader.readValue(inputStream);
-                ttl = cacheControlMaxAgeFromRequest(c.getHeaderFields(), cacheExpirationTime);
                 //noinspection unchecked
                 keys = (List<Map<String, Object>>) result.get("keys");
+                ttl = cacheControlMaxAgeFromRequest(c.getHeaderFields(), cacheExpirationTime);
             }
         } catch (IOException e) {
             throw new RuntimeException("Cannot obtain jwks from url " + url, e);
@@ -186,7 +185,7 @@ public class CachingJwkProvider implements JwkProvider {
         throw new IllegalArgumentException("No key found in " + url + " with kid " + keyId, null);
     }
 
-    record JwkResult(Jwk jwk, Duration cacheExpirationTime) { }
+    private record JwkResult(Jwk jwk, Duration cacheExpirationTime) { }
 
     @VisibleForTesting
     static Duration cacheControlMaxAgeFromRequest(Map<String, List<String>> headerFields, Duration defaultValue) {
@@ -201,7 +200,7 @@ public class CachingJwkProvider implements JwkProvider {
                             return Duration.ofSeconds(seconds);
                         }
                     } catch (NumberFormatException ignored) {
-                        // Can be ignored, just return null
+                        // Can be ignored, just return default value
                     }
                 }
             }
