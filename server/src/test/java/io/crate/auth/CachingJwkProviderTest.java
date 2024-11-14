@@ -65,6 +65,10 @@ public class CachingJwkProviderTest {
         headers = Map.of(HttpHeaderNames.CACHE_CONTROL.toString(), List.of("max-age=0"));
         duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers, null);
         assertThat(duration).isNull();
+
+        headers = Map.of(HttpHeaderNames.CACHE_CONTROL.toString(), List.of("max-age=0"));
+        duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers, Duration.ofHours(10));
+        assertThat(duration).isEqualTo(Duration.ofHours(10));
     }
 
 }
