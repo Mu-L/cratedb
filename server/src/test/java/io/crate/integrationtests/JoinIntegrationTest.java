@@ -1737,4 +1737,34 @@ public class JoinIntegrationTest extends IntegTestCase {
             "5| 5| 5"
         );
     }
+
+
+    /**
+     * https://github.com/crate/crate/issues/16951
+     */
+    @Test
+    @UseRandomizedSchema(random = false)
+    @UseRandomizedOptimizerRules(0)
+    @UseHashJoins(0)
+    public void test_joins_without_join_conditions_are_converted_to_cross_join() throws Exception {
+        execute("CREATE  TABLE  doc.t0(c1 VARCHAR(500))");
+        execute("CREATE  TABLE  doc.t1(c0 VARCHAR(500))");
+        execute("INSERT INTO doc.t0(c1) VALUES ('')");
+        execute("REFRESH TABLE doc.t0, doc.t1");
+        String query = "SELECT * FROM doc.t0, doc.t1 RIGHT JOIN (SELECT 1) AS sub0 ON true WHERE (NOT ((doc.t0.c1)>=(doc.t0.c1)))";
+        execute("EXPLAIN " + query);
+
+        assertThat(response).hasLines(
+            "NestedLoopJoin[CROSS] (rows=unknown)",
+            "  ├ NestedLoopJoin[CROSS] (rows=unknown)",
+            "  │  ├ Collect[doc.t0 | [c1] | (NOT (c1 >= c1))] (rows=unknown)",
+            "  │  └ Collect[doc.t1 | [c0] | true] (rows=unknown)",
+            "  └ Rename[\"1\"] AS sub0 (rows=unknown)",
+            "    └ TableFunction[empty_row | [1] | true] (rows=unknown)"
+        );
+
+        execute(query);
+        assertThat(response.rows()).isEmpty();
+    }
+
 }

@@ -41,6 +41,7 @@ import io.crate.analyze.relations.JoinPair;
 import io.crate.analyze.relations.QuerySplitter;
 import io.crate.common.collections.Lists;
 import io.crate.expression.operator.AndOperator;
+import io.crate.expression.symbol.Literal;
 import io.crate.expression.symbol.SelectSymbol;
 import io.crate.expression.symbol.Symbol;
 import io.crate.metadata.RelationName;
@@ -143,7 +144,7 @@ public class JoinPlanBuilder {
         RelationName nextName = nextRel.relationName();
 
         JoinPair joinPair = removeMatch(joinPairs, joinNames, nextName);
-        final JoinType type;
+        JoinType type;
         ArrayList<Symbol> conditions = new ArrayList<>();
         if (joinPair == null) {
             type = JoinType.CROSS;
@@ -177,11 +178,18 @@ public class JoinPlanBuilder {
                 .filter(Objects::nonNull).iterator()
         );
         boolean isFiltered = query.symbolType().isValueSymbol() == false;
+        var joinCondition = AndOperator.join(conditions, null);
+
+        if (type.isOuter() && (joinCondition == null || joinCondition.equals(Literal.of(true)))) {
+            joinCondition = null;
+            type = JoinType.CROSS;
+        }
+
         var joinPlan = new JoinPlan(
             source,
             nextPlan,
             type,
-            AndOperator.join(conditions, null),
+            joinCondition,
             isFiltered,
             false,
             false,
