@@ -50,8 +50,8 @@ import io.netty.handler.codec.http.HttpHeaderNames;
 
 /**
  * Custom @{@link JwkProvider} implementation based on
- * <a href="https://github.com/auth0/jwks-rsa-java/blob/master/src/main/java/com/auth0/jwk/UrlJwkProvider.java">...</a>
- * caches results of public jwk keys for the duration of the "Cache-Control max-age"
+ * <a href="https://github.com/auth0/jwks-rsa-java/blob/master/src/main/java/com/auth0/jwk/UrlJwkProvider.java">UrlJwkProvider.java</a>
+ * which caches results of public jwk keys for the duration of the "Cache-Control max-age"
  * Http header valye from the response of the jwt authentication endpoint or
  * a provided default value.
  */
