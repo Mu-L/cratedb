@@ -49,8 +49,9 @@ import com.github.benmanes.caffeine.cache.Expiry;
 import io.netty.handler.codec.http.HttpHeaderNames;
 
 /**
- * Custom @{@link JwkProvider} implementation which caches results
- * of public jwk keys for the duration of the "Cache-Control max-age"
+ * Custom @{@link JwkProvider} implementation based on
+ * <a href="https://github.com/auth0/jwks-rsa-java/blob/master/src/main/java/com/auth0/jwk/UrlJwkProvider.java">...</a>
+ * caches results of public jwk keys for the duration of the "Cache-Control max-age"
  * Http header valye from the response of the jwt authentication endpoint or
  * a provided default value.
  */
@@ -159,11 +160,11 @@ public class CachingJwkProvider implements JwkProvider {
                 keys = (List<Map<String, Object>>) result.get("keys");
             }
         } catch (IOException e) {
-            throw new RuntimeException("Cannot obtain jwks from url " + url.toString(), e);
+            throw new RuntimeException("Cannot obtain jwks from url " + url, e);
         }
 
         if (keys == null || keys.isEmpty()) {
-            throw new IllegalArgumentException("No keys found in " + url.toString(), null);
+            throw new IllegalArgumentException("No keys found in " + url, null);
         }
 
         List<Jwk> jwks = new ArrayList<>();
@@ -187,7 +188,7 @@ public class CachingJwkProvider implements JwkProvider {
                 }
             }
         }
-        throw new IllegalArgumentException("No key found in " + url.toString() + " with kid " + keyId, null);
+        throw new IllegalArgumentException("No key found in " + url + " with kid " + keyId, null);
     }
 
     record JwkResult(Jwk jwk, Duration cacheExpirationTime) { }
