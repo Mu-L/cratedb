@@ -36,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.elasticsearch.common.Strings;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.VisibleForTesting;
 
 import com.auth0.jwk.Jwk;
@@ -136,9 +137,9 @@ public class CachingJwkProvider implements JwkProvider {
         return cache.get(keyId, this::getResult).jwk;
     }
 
-    private JwkResult getResult(String keyId) {
+    private JwkResult getResult(@NotNull String keyId) {
         final List<Map<String, Object>> keys;
-        final Map<String, List<String>> responseHeaders;
+        final Duration ttl;
 
         try {
             final URLConnection c = (proxy == null) ? this.url.openConnection() : this.url.openConnection(proxy);
@@ -155,7 +156,7 @@ public class CachingJwkProvider implements JwkProvider {
 
             try (InputStream inputStream = c.getInputStream()) {
                 Map<String, Object> result = reader.readValue(inputStream);
-                responseHeaders = c.getHeaderFields();
+                ttl = cacheControlMaxAgeFromRequest(c.getHeaderFields(), cacheExpirationTime);
                 //noinspection unchecked
                 keys = (List<Map<String, Object>>) result.get("keys");
             }
@@ -173,19 +174,13 @@ public class CachingJwkProvider implements JwkProvider {
             jwks.add(Jwk.fromValues(values));
         }
 
-        Duration ttl = cacheControlMaxAgeFromRequest(responseHeaders);
-        if (ttl == null) {
-            ttl = cacheExpirationTime;
-        }
-
-        if (keyId == null && jwks.size() == 1) {
+        if (jwks.size() == 1) {
             return new JwkResult(jwks.get(0), ttl);
         }
-        if (keyId != null) {
-            for (Jwk jwk : jwks) {
-                if (keyId.equals(jwk.getId())) {
-                    return new JwkResult(jwk, ttl);
-                }
+        
+        for (Jwk jwk : jwks) {
+            if (keyId.equals(jwk.getId())) {
+                return new JwkResult(jwk, ttl);
             }
         }
         throw new IllegalArgumentException("No key found in " + url + " with kid " + keyId, null);
@@ -194,7 +189,7 @@ public class CachingJwkProvider implements JwkProvider {
     record JwkResult(Jwk jwk, Duration cacheExpirationTime) { }
 
     @VisibleForTesting
-    static Duration cacheControlMaxAgeFromRequest(Map<String, List<String>> headerFields) {
+    static Duration cacheControlMaxAgeFromRequest(Map<String, List<String>> headerFields, Duration defaultValue) {
         List<String> cacheControl = headerFields.get(HttpHeaderNames.CACHE_CONTROL.toString());
         if (cacheControl != null) {
             for (String value : cacheControl) {
@@ -211,7 +206,7 @@ public class CachingJwkProvider implements JwkProvider {
                 }
             }
         }
-        return null;
+        return defaultValue;
     }
 
 }

@@ -37,33 +37,33 @@ public class CachingJwkProviderTest {
     public void test_get_cache_control_max_age_from_request() throws Exception {
         Map<String, List<String>> headers = Map.of(HttpHeaderNames.CACHE_CONTROL.toString(), List.of("max-age=1000"));
 
-        var duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers);
+        var duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers, null);
         assertThat(duration).isEqualTo(Duration.ofSeconds(1000));
 
         headers = Map.of(HttpHeaderNames.CACHE_CONTROL.toString(), List.of("max-age=1000", "public"));
 
-        duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers);
+        duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers, null);
         assertThat(duration).isEqualTo(Duration.ofSeconds(1000));
 
         headers = Map.of(HttpHeaderNames.CACHE_CONTROL.toString(), List.of("foobar", "max-age=1000"));
 
-        duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers);
+        duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers, null);
         assertThat(duration).isEqualTo(Duration.ofSeconds(1000));
 
         headers = Map.of(HttpHeaderNames.CACHE_CONTROL.toString(), List.of("foobar", "wrong"));
-        duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers);
+        duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers, null);
         assertThat(duration).isNull();
 
         headers = Map.of(HttpHeaderNames.CACHE_CONTROL.toString(), List.of("max-age=-1"));
-        duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers);
+        duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers, null);
         assertThat(duration).isNull();
 
         headers = Map.of(HttpHeaderNames.CACHE_CONTROL.toString(), List.of("max-age=1.1"));
-        duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers);
+        duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers, null);
         assertThat(duration).isNull();
 
         headers = Map.of(HttpHeaderNames.CACHE_CONTROL.toString(), List.of("max-age=0"));
-        duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers);
+        duration = CachingJwkProvider.cacheControlMaxAgeFromRequest(headers, null);
         assertThat(duration).isNull();
     }
 
