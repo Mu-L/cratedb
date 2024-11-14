@@ -40,6 +40,9 @@ See the :ref:`version_5.9.0` release notes for a full list of changes in the
 Fixes
 =====
 
+- Fixed an issue that caused a ``ClassCastException`` when querying an object
+  array within object array.
+
 - Fixed an issue that would lead to wrong results when querying a table with a
   ``WHERE`` clause which filters on multiple columns, which are part of
   :ref:`PRIMARY KEY<constraints-primary-key>`, and there at least one of them is
