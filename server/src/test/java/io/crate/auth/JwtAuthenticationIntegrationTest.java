@@ -25,11 +25,13 @@ import static io.crate.testing.auth.RsaKeys.PRIVATE_KEY_256;
 import static io.crate.testing.auth.RsaKeys.PUBLIC_KEY_256;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.security.KeyFactory;
 import java.security.interfaces.RSAPrivateKey;
@@ -155,21 +157,36 @@ public class JwtAuthenticationIntegrationTest extends IntegTestCase {
         }
     }
 
-    @Test
-    public void test_can_authenticate_with_jwt_token() throws Exception {
-        testServer = new HttpTestServer(0, false, new RequestHandler(), Map.of(HttpHeaderNames.CACHE_CONTROL.toString(), "max-age=1000"));
-        testServer.run();
+    HttpResponse<String> sendRequest(URI uri, String jwt) throws IOException, InterruptedException {
+        try (var client = HttpClient.newHttpClient()) {
+            HttpRequest request = HttpRequest.newBuilder(uri)
+                .header(HttpHeaderNames.AUTHORIZATION.toString(), "Bearer " + jwt)
+                .header(HttpHeaderNames.ORIGIN.toString(), "http://example.com")
+                .header(HttpHeaderNames.ACCESS_CONTROL_REQUEST_METHOD.toString(), "GET")
+                .build();
+            return client.send(request, BodyHandlers.ofString());
+        }
+    }
 
+    String jwt(String appUsername, String iss, RSAPrivateKey privateKey) {
         // We use random port for the test suite (assigned by kernel)
         // Port affects url --> affects signature --> need to re-compute payload.
-        String iss = String.format(Locale.ENGLISH, "http://localhost:%d/keys", testServer.boundPort());
-        String appUsername = "cloud_user";
-        String jwt = JWT.create()
+        return JWT.create()
             .withHeader(Map.of("typ", "JWT", "alg", "RS256", "kid", KID))
             .withIssuer(iss)
             .withAudience(clusterService().state().metadata().clusterUUID())
             .withClaim("username", appUsername)
             .sign(Algorithm.RSA256(null, privateKey));
+    }
+
+    @Test
+    public void test_can_authenticate_with_jwt_token() throws Exception {
+        testServer = new HttpTestServer(0, false, new RequestHandler(), Map.of(HttpHeaderNames.CACHE_CONTROL.toString(), "max-age=1000"));
+        testServer.run();
+
+        String appUsername = "cloud_user";
+        String iss = String.format(Locale.ENGLISH, "http://localhost:%d/keys",testServer.boundPort());
+        String jwt = jwt(appUsername, iss, privateKey);
 
         // Important to surround name with quotes if name used in HBA is not in lowercase
         // Otherwise CREATE USER saves it in lowercase whereas HBA entry was created for "John"
@@ -181,21 +198,14 @@ public class JwtAuthenticationIntegrationTest extends IntegTestCase {
         InetSocketAddress address = httpTransport.boundAddress().publishAddress().address();
         URI uri = URI.create(String.format(Locale.ENGLISH, "http://%s:%s/", address.getHostName(), address.getPort()));
 
-        try (var client = HttpClient.newHttpClient()) {
-            HttpRequest request = HttpRequest.newBuilder(uri)
-                .header(HttpHeaderNames.AUTHORIZATION.toString(), "Bearer " + jwt)
-                .header(HttpHeaderNames.ORIGIN.toString(), "http://example.com")
-                .header(HttpHeaderNames.ACCESS_CONTROL_REQUEST_METHOD.toString(), "GET")
-                .build();
-            var resp = client.send(request, BodyHandlers.ofString());
-            assertThat(resp.body()).containsIgnoringWhitespaces("""
-                {
-                  "ok" : true,
-                  "status" : 200
-                  """);
-        }
-
+        var resp = sendRequest(uri, jwt);
+        assertThat(resp.body()).containsIgnoringWhitespaces("""
+            {
+              "ok" : true,
+              "status" : 200
+            """);
     }
+
 
     @Test
     public void test_can_authenticate_with_jwt_token_cached() throws Exception {
@@ -203,16 +213,9 @@ public class JwtAuthenticationIntegrationTest extends IntegTestCase {
         testServer = new HttpTestServer(0, false, requestHandler, Map.of(HttpHeaderNames.CACHE_CONTROL.toString(), "max-age=1000"));
         testServer.run();
 
-        // We use random port for the test suite (assigned by kernel)
-        // Port affects url --> affects signature --> need to re-compute payload.
-        String iss = String.format(Locale.ENGLISH, "http://localhost:%d/keys", testServer.boundPort());
         String appUsername = "cloud_user";
-        String jwt = JWT.create()
-            .withHeader(Map.of("typ", "JWT", "alg", "RS256", "kid", KID))
-            .withIssuer(iss)
-            .withAudience(clusterService().state().metadata().clusterUUID())
-            .withClaim("username", appUsername)
-            .sign(Algorithm.RSA256(null, privateKey));
+        String iss = String.format(Locale.ENGLISH, "http://localhost:%d/keys",testServer.boundPort());
+        String jwt = jwt(appUsername, iss, privateKey);
 
         // Important to surround name with quotes if name used in HBA is not in lowercase
         // Otherwise CREATE USER saves it in lowercase whereas HBA entry was created for "John"
@@ -224,50 +227,29 @@ public class JwtAuthenticationIntegrationTest extends IntegTestCase {
         InetSocketAddress address = httpTransport.boundAddress().publishAddress().address();
         URI uri = URI.create(String.format(Locale.ENGLISH, "http://%s:%s/", address.getHostName(), address.getPort()));
 
-        try (var client = HttpClient.newHttpClient()) {
-            HttpRequest request = HttpRequest.newBuilder(uri)
-                .header(HttpHeaderNames.AUTHORIZATION.toString(), "Bearer " + jwt)
-                .header(HttpHeaderNames.ORIGIN.toString(), "http://example.com")
-                .header(HttpHeaderNames.ACCESS_CONTROL_REQUEST_METHOD.toString(), "GET")
-                .build();
-            var resp = client.send(request, BodyHandlers.ofString());
-            assertThat(resp.body()).containsIgnoringWhitespaces("""
+        var resp = sendRequest(uri, jwt);
+        assertThat(resp.body()).containsIgnoringWhitespaces("""
                 {
                   "ok" : true,
                   "status" : 200
                   """);
-        }
 
         assertThat(requestHandler.numberOfInvocation.get()).isEqualTo(1);
 
         // Now try a second time, same domain different user
         appUsername = "cloud_user_1";
-        jwt = JWT.create()
-            .withHeader(Map.of("typ", "JWT", "alg", "RS256", "kid", KID))
-            .withIssuer(iss)
-            .withAudience(clusterService().state().metadata().clusterUUID())
-            .withClaim("username", appUsername)
-            .sign(Algorithm.RSA256(null, privateKey));
-
+        jwt = jwt(appUsername, iss, privateKey);
 
         execute("CREATE USER \"Joe\" " +
             "WITH (jwt = {\"iss\" = '" + iss + "', \"username\" = '" + appUsername + "'})"
         );
 
-
-        try (var client = HttpClient.newHttpClient()) {
-            HttpRequest request = HttpRequest.newBuilder(uri)
-                .header(HttpHeaderNames.AUTHORIZATION.toString(), "Bearer " + jwt)
-                .header(HttpHeaderNames.ORIGIN.toString(), "http://example.com")
-                .header(HttpHeaderNames.ACCESS_CONTROL_REQUEST_METHOD.toString(), "GET")
-                .build();
-            var resp = client.send(request, BodyHandlers.ofString());
-            assertThat(resp.body()).containsIgnoringWhitespaces("""
+        resp = sendRequest(uri, jwt);
+        assertThat(resp.body()).containsIgnoringWhitespaces("""
                 {
                   "ok" : true,
                   "status" : 200
                   """);
-        }
 
         assertThat(requestHandler.numberOfInvocation.get()).isEqualTo(1);
 
@@ -281,12 +263,7 @@ public class JwtAuthenticationIntegrationTest extends IntegTestCase {
         }
         String iss = String.format(Locale.ENGLISH, "http://localhost:%d/keys", port);
         String appUsername = "cloud_user";
-        String jwt = JWT.create()
-            .withHeader(Map.of("typ", "JWT", "alg", "RS256", "kid", KID))
-            .withIssuer(iss)
-            .withAudience(clusterService().state().metadata().clusterUUID())
-            .withClaim("username", appUsername)
-            .sign(Algorithm.RSA256(null, privateKey));
+        String jwt = jwt(appUsername, iss, privateKey);
 
         execute("CREATE USER \"John\" " +
             "WITH (jwt = {\"iss\" = '" + iss + "', \"username\" = '" + appUsername + "'})"
@@ -295,14 +272,8 @@ public class JwtAuthenticationIntegrationTest extends IntegTestCase {
         HttpServerTransport httpTransport = cluster().getInstance(HttpServerTransport.class);
         InetSocketAddress address = httpTransport.boundAddress().publishAddress().address();
         URI uri = URI.create(String.format(Locale.ENGLISH, "http://%s:%s/", address.getHostName(), address.getPort()));
-        try (var httpClient = HttpClient.newHttpClient()) {
-            var request = HttpRequest.newBuilder(uri)
-                .header(HttpHeaderNames.AUTHORIZATION.toString(), "Bearer " + jwt)
-                .header(HttpHeaderNames.ORIGIN.toString(), "http://example.com")
-                .header(HttpHeaderNames.ACCESS_CONTROL_REQUEST_METHOD.toString(), "GET")
-                .build();
-            var resp = httpClient.send(request, BodyHandlers.ofString());
-            assertThat(resp.body()).contains("jwt authentication failed for user John. Reason: Cannot obtain jwks from url");
-        }
+        var resp = sendRequest(uri, jwt);
+        assertThat(resp.body()).contains("jwt authentication failed for user John. Reason: Cannot obtain jwks from url");
+
     }
 }
