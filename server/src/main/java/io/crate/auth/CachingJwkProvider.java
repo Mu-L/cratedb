@@ -112,7 +112,7 @@ public class CachingJwkProvider implements JwkProvider {
                 }
             }).build();
     }
-    
+
     static URL urlForDomain(String domain) {
         if (Strings.isNullOrEmpty(domain)) {
             throw new IllegalArgumentException("A domain is required");
@@ -168,12 +168,8 @@ public class CachingJwkProvider implements JwkProvider {
 
         List<Jwk> jwks = new ArrayList<>();
 
-        try {
-            for (Map<String, Object> values : keys) {
-                jwks.add(Jwk.fromValues(values));
-            }
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Failed to parse jwk from json", e);
+        for (Map<String, Object> values : keys) {
+            jwks.add(Jwk.fromValues(values));
         }
 
         Duration ttl = cacheControlMaxAgeFromRequest(responseHeaders);
