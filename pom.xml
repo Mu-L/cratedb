@@ -447,6 +447,18 @@
       </properties>
     </profile>
     <profile>
+      <id>x86_64</id>
+      <activation>
+        <property>
+          <name>os.arch</name>
+          <value>x86_64</value>
+        </property>
+      </activation>
+      <properties>
+        <os.arch.classifier>x86_64</os.arch.classifier>
+      </properties>
+    </profile>
+    <profile>
       <id>aarch64</id>
       <activation>
         <property>
@@ -481,6 +493,18 @@
       </activation>
       <properties>
         <os.classifier>osx-${os.arch.classifier}</os.classifier>
+      </properties>
+    </profile>
+    <profile>
+      <id>windows</id>
+      <activation>
+        <os>
+          <family>windows</family>
+        </os>
+      </activation>
+      <properties>
+        <!-- OpenDAL provides x64 packages only, but Windows arm64 >= 10 Build 21277 can emulate it   -->
+        <os.classifier>windows-x86_64</os.classifier>
       </properties>
     </profile>
 
