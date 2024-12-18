@@ -223,18 +223,12 @@ public class ShardChangesAction extends ActionType<ShardChangesAction.Response> 
             return Response::new;
         }
 
-        @Override
-        protected boolean resolveIndex(Request request) {
-            return true;
-        }
-
         @Nullable
         @Override
-        protected ShardsIterator shards(ClusterState state,
-                                        TransportSingleShardAction<Request, Response>.InternalRequest request) {
+        protected ShardsIterator shards(ClusterState state, Request request) {
             return state.routingTable().shardRoutingTable(
-                request.request().shardId().getIndexName(),
-                request.request().shardId().id()
+                request.index(),
+                request.shardId().id()
             ).activeInitializingShardsRandomIt();
         }
     }
