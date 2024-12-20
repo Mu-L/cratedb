@@ -87,7 +87,6 @@ import io.crate.planner.SubqueryPlanner.SubQueries;
 import io.crate.planner.consumer.InsertFromSubQueryPlanner;
 import io.crate.planner.optimizer.Optimizer;
 import io.crate.planner.optimizer.Rule;
-import io.crate.planner.optimizer.costs.PlanStats;
 import io.crate.planner.optimizer.iterative.IterativeOptimizer;
 import io.crate.planner.optimizer.rule.DeduplicateOrder;
 import io.crate.planner.optimizer.rule.EliminateCrossJoin;
@@ -118,6 +117,7 @@ import io.crate.planner.optimizer.rule.RemoveOrderBeneathInsert;
 import io.crate.planner.optimizer.rule.RemoveRedundantEval;
 import io.crate.planner.optimizer.rule.ReorderHashJoin;
 import io.crate.planner.optimizer.rule.ReorderNestedLoopJoin;
+import io.crate.planner.optimizer.rule.RewriteFilterOnCrossJoinToInnerJoin;
 import io.crate.planner.optimizer.rule.RewriteFilterOnOuterJoinToInnerJoin;
 import io.crate.planner.optimizer.rule.RewriteGroupByKeysLimitToLimitDistinct;
 import io.crate.planner.optimizer.rule.RewriteJoinPlan;
@@ -161,6 +161,7 @@ public class LogicalPlanner {
         new MergeFilterAndCollect(),
         new MergeFilterAndForeignCollect(),
         new RewriteFilterOnOuterJoinToInnerJoin(),
+        new RewriteFilterOnCrossJoinToInnerJoin(),
         new MoveOrderBeneathUnion(),
         new MoveOrderBeneathNestedLoop(),
         new MoveOrderBeneathEval(),
@@ -224,7 +225,6 @@ public class LogicalPlanner {
 
     public LogicalPlan planSubSelect(SelectSymbol selectSymbol, PlannerContext plannerContext) {
         AnalyzedRelation relation = selectSymbol.relation();
-
         final int fetchSize;
         final UnaryOperator<LogicalPlan> maybeApplySoftLimit;
         ResultType resultType = selectSymbol.getResultType();
@@ -253,31 +253,60 @@ public class LogicalPlanner {
         var planBuilder = new PlanBuilder(
             subqueryPlanner,
             foreignDataWrappers,
-            plannerContext.planStats(),
             plannerContext.clusterState(),
             plannerContext.transactionContext()
         );
         LogicalPlan plan = relation.accept(planBuilder, relation.outputs());
-
         plan = tryOptimizeForInSubquery(selectSymbol, relation, plan);
-        LogicalPlan optimizedPlan = optimize(maybeApplySoftLimit.apply(plan), plannerContext);
+        return new RootRelationBoundary(optimize(maybeApplySoftLimit.apply(plan), relation, plannerContext, false));
+    }
+
+    private LogicalPlan optimize(LogicalPlan plan,
+                                 AnalyzedRelation relation,
+                                 PlannerContext plannerContext,
+                                 boolean avoidTopLevelFetch) {
+        CoordinatorTxnCtx txnCtx = plannerContext.transactionContext();
+        OptimizerTracer tracer = plannerContext.optimizerTracer();
+        var timeoutToken = plannerContext.timeoutToken();
+        LogicalPlan optimizedPlan = optimizer.optimize(plan, plannerContext.planStats(), txnCtx, tracer, timeoutToken);
+        optimizedPlan = joinOrderOptimizer.optimize(optimizedPlan, plannerContext.planStats(), txnCtx, tracer, timeoutToken);
         LogicalPlan prunedPlan = optimizedPlan.pruneOutputsExcept(relation.outputs());
-        assert prunedPlan.outputs().equals(optimizedPlan.outputs()) : "Pruned plan must have the same outputs as original plan";
-        return new RootRelationBoundary(prunedPlan);
+        assert prunedPlan.outputs().equals(optimizedPlan.outputs())
+            : "Pruned plan must have the same outputs as original plan";
+        LogicalPlan fetchOptimized = fetchOptimizer.optimize(
+            prunedPlan,
+            plannerContext.planStats(),
+            txnCtx,
+            tracer,
+            timeoutToken
+        );
+        if (fetchOptimized != prunedPlan || avoidTopLevelFetch) {
+            return fetchOptimized;
+        }
+        // Doing a second pass here to also rewrite additional plan patterns to "Fetch"
+        // The `fetchOptimizer` operators on `Limit - X` fragments of a tree.
+        // This here instead operators on a narrow selection of top-level patterns
+        //
+        // The reason for this is that some plans are cheaper to execute as fetch
+        // even if there is no operator that reduces the number of records
+        return RewriteToQueryThenFetch.tryRewrite(relation, fetchOptimized);
     }
 
     public LogicalPlan optimize(LogicalPlan plan, PlannerContext plannerContext) {
+        var timeoutToken = plannerContext.timeoutToken();
         LogicalPlan optimizedPlan = optimizer.optimize(
             plan,
             plannerContext.planStats(),
             plannerContext.transactionContext(),
-            plannerContext.optimizerTracer()
+            plannerContext.optimizerTracer(),
+            timeoutToken
         );
         optimizedPlan = joinOrderOptimizer.optimize(
             optimizedPlan,
             plannerContext.planStats(),
             plannerContext.transactionContext(),
-            plannerContext.optimizerTracer()
+            plannerContext.optimizerTracer(),
+            timeoutToken
         );
         return optimizedPlan;
     }
@@ -311,56 +340,29 @@ public class LogicalPlanner {
                             PlannerContext plannerContext,
                             SubqueryPlanner subqueryPlanner,
                             boolean avoidTopLevelFetch) {
-        CoordinatorTxnCtx coordinatorTxnCtx = plannerContext.transactionContext();
-        OptimizerTracer tracer = plannerContext.optimizerTracer();
-        PlanStats planStats = plannerContext.planStats();
         var planBuilder = new PlanBuilder(
             subqueryPlanner,
             foreignDataWrappers,
-            planStats,
             plannerContext.clusterState(),
-            coordinatorTxnCtx
+            plannerContext.transactionContext()
         );
         LogicalPlan logicalPlan = relation.accept(planBuilder, relation.outputs());
-        LogicalPlan optimizedPlan = optimize(logicalPlan, plannerContext);
-        assert logicalPlan.outputs().equals(optimizedPlan.outputs()) : "Optimized plan must have the same outputs as original plan";
-        LogicalPlan prunedPlan = optimizedPlan.pruneOutputsExcept(relation.outputs());
-        assert prunedPlan.outputs().equals(optimizedPlan.outputs()) : "Pruned plan must have the same outputs as original plan";
-        LogicalPlan fetchOptimized = fetchOptimizer.optimize(
-            prunedPlan,
-            planStats,
-            coordinatorTxnCtx,
-            tracer
-        );
-        if (fetchOptimized != prunedPlan || avoidTopLevelFetch) {
-            return fetchOptimized;
-        }
-        assert logicalPlan.outputs().equals(fetchOptimized.outputs()) : "Fetch optimized plan must have the same outputs as original plan";
-        // Doing a second pass here to also rewrite additional plan patterns to "Fetch"
-        // The `fetchOptimizer` operators on `Limit - X` fragments of a tree.
-        // This here instead operators on a narrow selection of top-level patterns
-        //
-        // The reason for this is that some plans are cheaper to execute as fetch
-        // even if there is no operator that reduces the number of records
-        return RewriteToQueryThenFetch.tryRewrite(relation, fetchOptimized);
+        return optimize(logicalPlan, relation, plannerContext, avoidTopLevelFetch);
     }
 
     static class PlanBuilder extends AnalyzedRelationVisitor<List<Symbol>, LogicalPlan> {
 
         private final SubqueryPlanner subqueryPlanner;
-        private final PlanStats planStats;
         private final ForeignDataWrappers foreignDataWrappers;
         private final ClusterState clusterState;
         private final CoordinatorTxnCtx coordinatorTxnCtx;
 
         private PlanBuilder(SubqueryPlanner subqueryPlanner,
                             ForeignDataWrappers foreignDataWrappers,
-                            PlanStats planStats,
                             ClusterState clusterState,
                             CoordinatorTxnCtx coordinatorTxnCtx) {
             this.subqueryPlanner = subqueryPlanner;
             this.foreignDataWrappers = foreignDataWrappers;
-            this.planStats = planStats;
             this.clusterState = clusterState;
             this.coordinatorTxnCtx = coordinatorTxnCtx;
         }
@@ -690,7 +692,8 @@ public class LogicalPlanner {
                     subqueryPlanner),
                 context.planStats(),
                 context.transactionContext(),
-                context.optimizerTracer()
+                context.optimizerTracer(),
+                context.timeoutToken()
             );
         }
     }

@@ -23,6 +23,7 @@ package io.crate.analyze.where;
 
 import static io.crate.testing.Asserts.isLiteral;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
 import java.util.Map;
@@ -32,9 +33,12 @@ import org.junit.Test;
 
 import io.crate.analyze.relations.AnalyzedRelation;
 import io.crate.analyze.relations.DocTableRelation;
+import io.crate.common.unit.TimeValue;
+import io.crate.exceptions.JobKilledException;
 import io.crate.expression.symbol.Symbol;
 import io.crate.metadata.ColumnIdent;
 import io.crate.metadata.RelationName;
+import io.crate.session.Session;
 import io.crate.testing.SqlExpressions;
 import io.crate.testing.T3;
 
@@ -401,7 +405,7 @@ public class EqualityExtractorTest extends EqualityExtractorBaseTest {
         };
 
         var matches = extractor.extractMatches(
-            List.of(x, i), query(sj.toString()), coordinatorTxnCtx).matches();
+            List.of(x, i), query(sj.toString()), coordinatorTxnCtx, Session.TimeoutToken.noopToken()).matches();
         assertThat(matches).isNull();
 
         extractor = new EqualityExtractor(normalizer) {
@@ -411,7 +415,52 @@ public class EqualityExtractorTest extends EqualityExtractorBaseTest {
             }
         };
         matches = extractor.extractMatches(
-            List.of(x, i), query(sj.toString()), coordinatorTxnCtx).matches();
+            List.of(x, i), query(sj.toString()), coordinatorTxnCtx, Session.TimeoutToken.noopToken()).matches();
         assertThat(matches).isNotNull();
     }
+
+    @Test
+    public void test_pk_extraction_interrupted_when_exceeds_timeout() {
+        Session.TimeoutToken token = new TestToken(TimeValue.timeValueMillis(10), 3);
+        StringJoiner sj = new StringJoiner(" or ");
+        for (int j = 0; j < 20; j++) {
+            sj.add("x = ? AND i = ?");
+        }
+
+        EqualityExtractor extractor = new EqualityExtractor(normalizer) {
+            @Override
+            protected int maxIterations() {
+                return 1000;
+            }
+        };
+
+        assertThatThrownBy(() -> extractor.extractMatches(
+            List.of(x, i),
+            query(sj.toString()),
+            coordinatorTxnCtx,
+            token).matches()
+        )
+            .isExactlyInstanceOf(JobKilledException.class)
+            .hasMessage("Job killed. statement_timeout (10ms)");
+    }
+
+    private static class TestToken extends Session.TimeoutToken {
+
+        private final int maxChecks;
+        private int checks;
+
+        public TestToken(TimeValue statementTimeout, int maxChecks) {
+            super(statementTimeout, System.nanoTime());
+            this.checks = 0;
+            this.maxChecks = maxChecks;
+        }
+
+        public void check() {
+            checks++;
+            if (statementTimeout.nanos() > 0 && checks > maxChecks) {
+                throw JobKilledException.of("statement_timeout (" + statementTimeout + ")");
+            }
+        }
+    }
+
 }

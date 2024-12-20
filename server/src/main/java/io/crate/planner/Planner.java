@@ -36,6 +36,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.jetbrains.annotations.Nullable;
 
 import io.crate.analyze.AnalyzedAlterRole;
+import io.crate.analyze.AnalyzedAlterServer;
 import io.crate.analyze.AnalyzedAlterTable;
 import io.crate.analyze.AnalyzedAlterTableAddColumn;
 import io.crate.analyze.AnalyzedAlterTableDropCheckConstraint;
@@ -165,6 +166,7 @@ import io.crate.replication.logical.plan.DropPublicationPlan;
 import io.crate.replication.logical.plan.DropSubscriptionPlan;
 import io.crate.role.RoleManager;
 import io.crate.session.Cursors;
+import io.crate.session.Session;
 import io.crate.sql.tree.SetSessionAuthorizationStatement;
 import io.crate.statistics.TableStats;
 
@@ -217,7 +219,8 @@ public class Planner extends AnalyzedStatementVisitor<PlannerContext, Plan> {
                                         int fetchSize,
                                         @Nullable Row params,
                                         Cursors cursors,
-                                        TransactionState transactionState) {
+                                        TransactionState transactionState,
+                                        Session.TimeoutToken timeoutToken) {
         return new PlannerContext(
             clusterService.state(),
             routingProvider,
@@ -229,7 +232,8 @@ public class Planner extends AnalyzedStatementVisitor<PlannerContext, Plan> {
             cursors,
             transactionState,
             new PlanStats(nodeCtx, txnCtx, tableStats),
-            this.logicalPlanner::optimize
+            this.logicalPlanner::optimize,
+            timeoutToken
         );
     }
 
@@ -667,6 +671,11 @@ public class Planner extends AnalyzedStatementVisitor<PlannerContext, Plan> {
     @Override
     public Plan visitCreateServer(AnalyzedCreateServer createServer, PlannerContext context) {
         return new CreateServerPlan(foreignDataWrappers, createServer);
+    }
+
+    @Override
+    public Plan visitAlterServer(AnalyzedAlterServer alterServer, PlannerContext context) {
+        return new AlterServerPlan(foreignDataWrappers, alterServer);
     }
 
     @Override
