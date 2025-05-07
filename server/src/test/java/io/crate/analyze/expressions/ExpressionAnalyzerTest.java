@@ -26,6 +26,7 @@ import static io.crate.testing.Asserts.exactlyInstanceOf;
 import static io.crate.testing.Asserts.isFunction;
 import static io.crate.testing.Asserts.isLiteral;
 import static io.crate.testing.Asserts.isReference;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
@@ -329,8 +330,7 @@ public class ExpressionAnalyzerTest extends CrateDummyClusterServiceUnitTest {
     public void testAnyWithArrayOnBothSidesResultsInNiceErrorMessage() {
         assertThatThrownBy(() -> executor.analyze("select * from tarr where xs = ANY([10, 20])"))
             .isExactlyInstanceOf(UnsupportedFunctionException.class)
-            .hasMessageStartingWith("Unknown function: (doc.tarr.xs = ANY([10, 20]))," +
-                        " no overload found for matching argument types: (integer_array, integer_array).");
+            .hasMessage("Invalid arguments in: (doc.tarr.xs = ANY([10, 20])) with (integer_array, integer_array). Valid types: (E, array(E))");
     }
 
     @Test
@@ -521,6 +521,8 @@ public class ExpressionAnalyzerTest extends CrateDummyClusterServiceUnitTest {
     public void test_any_automatically_levels_array_dimensions() throws Exception {
         assertThat(executor.asSymbol("1 = ANY([1, 2])")).isLiteral(true);
         assertThat(executor.asSymbol("3 = ANY([1, 2])")).isLiteral(false);
+        assertThat(executor.asSymbol("'Hello' LIKE ANY(['Hell%', 'No'])")).isLiteral(true);
+        assertThat(executor.asSymbol("'Hello' LIKE ANY([['Hell', 'No'], ['Hell_']])")).isLiteral(true);
 
         assertThat(executor.asSymbol("[1, 2] = ANY([[3, 4], [1, 2]])")).isLiteral(true);
         assertThat(executor.asSymbol("[1, 3] = ANY([[3, 4], [1, 2]])")).isLiteral(false);

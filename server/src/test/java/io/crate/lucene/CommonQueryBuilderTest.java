@@ -414,8 +414,7 @@ public class CommonQueryBuilderTest extends LuceneQueryBuilderTest {
         assertThatThrownBy(() -> convert("_doc > {\"name\"='foo'}"))
             .isExactlyInstanceOf(UnsupportedFunctionException.class)
             .hasMessageStartingWith(
-                "Unknown function: (doc.users._doc > _map('name', 'foo'))," +
-                " no overload found for matching argument types: (object, object).");
+                "Invalid arguments in: (doc.users._doc > {name = 'foo'}) with (object, object).");
 
     }
 
@@ -523,6 +522,12 @@ public class CommonQueryBuilderTest extends LuceneQueryBuilderTest {
     public void testEqAnyOnNestedArray() {
         assertThat(convert("[1, 2] = any(o_array['xs'])")).hasToString(
             "+o_array.xs:{1 2} #([1, 2] = ANY(o_array['xs']))");
+    }
+
+    @Test
+    public void test_like_any_on_nested_array() throws Exception {
+        assertThat(convert("'Hello' LIKE ANY(o_array['xs'])"))
+            .hasToString("('Hello' LIKE ANY(array_unnest(o_array['xs'])))");
     }
 
     @Test
